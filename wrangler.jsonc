@@ -11,12 +11,12 @@
 
   // D1 — system of record. Fill database_id from `wrangler d1 create feedhub`.
   "d1_databases": [
-    { "binding": "DB", "database_name": "feedhub", "database_id": "PLACEHOLDER_D1_ID", "migrations_dir": "migrations" }
+    { "binding": "DB", "database_name": "feedhub", "database_id": "0165711f-4e9e-4f51-b8bc-75d897afedf1" }
   ],
 
-  // KV — rendered-feed cache only (staleness harmless). Fill id from `wrangler kv namespace create FEED_CACHE`.
+  // KV — rendered-feed cache only (staleness harmless).
   "kv_namespaces": [
-    { "binding": "FEED_CACHE", "id": "PLACEHOLDER_KV_ID" }
+    { "binding": "FEED_CACHE", "id": "23426e7e96524e4a98a4fc11776512ff" }
   ],
 
   // Durable Object — single-flight poll/enqueue lock (D1 read-your-writes + serialized execution).
@@ -45,6 +45,7 @@
   "vars": {
     "ALLOWED_ORIGINS": "https://ishtar.numetal.xyz,https://numetal.xyz,https://gokhan.vc,https://gokhanturhan.com,https://avalidurl.github.io",
     "FEEDS": "https://ishtar.numetal.xyz/rss.xml,https://numetal.xyz/feed.xml,https://gokhan.vc/feed.xml,https://gokhanturhan.com/rss.xml",
-    "SENDER": "Gökhan Turhan <newsletter@gokhan.vc>"
+    "SENDER": "Gökhan Turhan <newsletter@gokhan.vc>",
+    "LAUNCH": "off"
   }
 }

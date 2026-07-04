@@ -17,6 +17,7 @@ export interface Env {
   ALLOWED_ORIGINS: string;
   FEEDS: string;
   SENDER: string;
+  LAUNCH?: string; // "on" enables per-post email/XMTP fan-out; anything else = no sends (default)
   // secrets:
   UNSUB_SECRET: string;
   ADMIN_TOKEN: string;
@@ -56,6 +57,37 @@ export function normalizeUrl(raw: string): string {
     return raw.trim();
   }
 }
+
+// Resolve a post's TRUE canonical by reading its HTML <link rel=canonical> — so every
+// syndicated copy (Numetal/Atelier/Personal → Ishtar) folds to ONE item. Falls back to
+// the feed link if the page has no canonical.
+async function fetchCanonical(link: string): Promise<string> {
+  try {
+    const res = await fetch(link, { headers: { "User-Agent": "feedhub/1.0" }, redirect: "follow" });
+    // HTTP Link: <...>; rel="canonical" header wins if present
+    const lh = res.headers.get("Link");
+    const lm = lh && lh.match(/<([^>]+)>\s*;\s*rel=["']?canonical/i);
+    if (lm) return normalizeUrl(lm[1]);
+    const html = await res.text();
+    const m = html.match(/<link[^>]+rel=["']canonical["'][^>]*href=["']([^"']+)["']/i)
+      || html.match(/<link[^>]+href=["']([^"']+)["'][^>]*rel=["']canonical["']/i)
+      || html.match(/<meta[^>]+property=["']og:url["'][^>]*content=["']([^"']+)["']/i);
+    if (m) return normalizeUrl(m[1]);
+  } catch { /* fall through */ }
+  return normalizeUrl(link);
+}
+
+const INDEX_HTML = `<!doctype html><meta charset="utf-8"><title>feedhub</title>
+<style>body{font:15px/1.6 ui-monospace,Menlo,monospace;max-width:680px;margin:6vh auto;padding:0 20px;color:#141414;background:#f7f7f5}h1{font-size:22px}code{background:#e7e7e7;padding:1px 5px}a{color:#e10600}.m{color:#6a6a6a}</style>
+<h1>feedhub <span class="m">· api.gokhan.vc</span></h1>
+<p class="m">The unified newsletter + RSS hub for Gökhan Turhan — one feed across the personal blog, the venture studio, and the agent-acceleration bureau. Cross-posts fold to a single canonical.</p>
+<ul>
+<li><a href="/feed.xml">/feed.xml</a> — unified RSS</li>
+<li><a href="/feed.json">/feed.json</a> — unified JSON Feed</li>
+<li><code>POST /subscribe</code> — email and/or wallet (double opt-in)</li>
+<li><code>GET /unsubscribe?t=…</code> — one-click opt-out</li>
+</ul>
+<p class="m">Sources: ishtar.numetal.xyz · numetal.xyz · gokhan.vc · gokhanturhan.com</p>`;
 
 // ---------- HMAC unsubscribe token (signature IS the authorization) ----------
 async function hmac(key: string, msg: string): Promise<string> {
@@ -129,8 +161,16 @@ export default {
     // ---- admin (bearer-gated) ----
     if (p === "/admin/status") return adminStatus(req, env);
     if (p === "/admin/import" && req.method === "POST") return adminImport(req, env);
+    if (p === "/admin/poll" && req.method === "POST") {
+      if (!bearerOk(req, env)) return new Response("unauthorized", { status: 401 });
+      await env.POLLER.get(env.POLLER.idFromName("singleton")).fetch("https://poller/run");
+      return json({ ok: true, polled: true });
+    }
 
-    return new Response("feedhub", { status: 200, headers: co });
+    if (p === "/" || p === "/index.html") {
+      return new Response(INDEX_HTML, { status: 200, headers: { "content-type": "text/html; charset=utf-8", ...co } });
+    }
+    return new Response("Not found", { status: 404, headers: co });
   },
 
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
@@ -142,7 +182,9 @@ export default {
 
   async queue(batch: MessageBatch, env: Env): Promise<void> {
     // Email fan-out consumer — one Resend broadcast per post (broadcasts PK = exactly-once).
+    // Hard safety gate: never send unless explicitly launched.
     for (const msg of batch.messages) {
+      if (env.LAUNCH !== "on") { msg.ack(); continue; }
       try {
         await emailBroadcast(env, (msg.body as any).url);
         msg.ack();
@@ -352,11 +394,15 @@ export class Poller {
     const feeds = this.env.FEEDS.split(",").map((s) => s.trim()).filter(Boolean);
     const results = await Promise.allSettled(feeds.map((f) => this.pollFeed(f)));
     void results;
-    // latch new posts → enqueue fan-out
+    // latch new posts → enqueue fan-out ONLY when launched. Pre-launch the latch still marks
+    // items notified (so turning LAUNCH on never backfills the whole archive) but sends NOTHING.
+    const launched = this.env.LAUNCH === "on";
     const fresh = await this.env.DB.prepare("UPDATE items SET notified_at=?1 WHERE notified_at IS NULL RETURNING canonical_url").bind(now()).all<{ canonical_url: string }>();
-    for (const r of fresh.results || []) {
-      await this.env.EMAIL_Q.send({ url: r.canonical_url, channel: "email" });
-      await this.env.XMTP_Q.send({ url: r.canonical_url, channel: "xmtp" });
+    if (launched) {
+      for (const r of fresh.results || []) {
+        await this.env.EMAIL_Q.send({ url: r.canonical_url, channel: "email" });
+        await this.env.XMTP_Q.send({ url: r.canonical_url, channel: "xmtp" });
+      }
     }
     await this.renderCache();
   }
@@ -372,7 +418,7 @@ export class Poller {
     const xml = await res.text();
     const feedKey = feedUrl.includes("ishtar") ? "ishtar" : feedUrl.includes("numetal") ? "numetal" : feedUrl.includes("gokhan.vc") ? "atelier" : "personal";
     for (const it of parseFeed(xml)) {
-      const canonical = normalizeUrl(it.link);
+      const canonical = await fetchCanonical(it.link); // resolve rel=canonical → cross-feed dedup
       // canonical_url PK: a syndicated copy that resolves to the same canonical collides → no dupe.
       await this.env.DB.prepare(
         `INSERT INTO items (canonical_url,title,author,summary,origin_feed,seen_via,published,first_seen)
