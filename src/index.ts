@@ -186,6 +186,17 @@ function timingSafeEq(a: string, b: string): boolean {
   return d === 0;
 }
 
+// Approximate KV rate limiter. KV is eventually consistent, so this bounds abuse to the right
+// order of magnitude rather than an exact count — enough to stop the unauthenticated /subscribe
+// confirm-email mailbomb (which rides the same Resend account/domain as the launch blast).
+async function rlHit(env: Env, key: string, limit: number, windowSec: number): Promise<boolean> {
+  const k = "rl:" + key;
+  const n = (parseInt((await env.FEED_CACHE.get(k)) || "0", 10) || 0);
+  if (n >= limit) return false;
+  await env.FEED_CACHE.put(k, String(n + 1), { expirationTtl: windowSec });
+  return true;
+}
+
 // ---------- CORS (allowlist, always Vary: Origin) ----------
 function cors(env: Env, req: Request): Record<string, string> {
   const origin = req.headers.get("Origin") || "";
@@ -311,6 +322,14 @@ async function subscribe(req: Request, env: Env, co: Record<string, string>): Pr
     }).then((r) => r.json() as any).catch(() => ({ success: false }));
     if (!v.success) return json({ error: "captcha failed" }, 400, co);
   }
+  // Rate-limit this unauthenticated endpoint: it writes D1 rows and (email path) fires an outbound
+  // Resend confirm mail — a mailbomb/abuse vector that could torch the sender reputation the launch
+  // blast depends on. Global + per-IP + per-recipient caps. Turnstile lands when the public form ships.
+  const ip = req.headers.get("CF-Connecting-IP") || "0";
+  if (!(await rlHit(env, "sub:global", 60, 3600)) || !(await rlHit(env, "sub:ip:" + ip, 8, 3600)))
+    return json({ error: "rate_limited" }, 429, co);
+  if (email && !(await rlHit(env, "sub:to:" + email, 1, 3600)))
+    return json({ error: "rate_limited" }, 429, co);
   // upsert by matching identifier — one row per person
   let existing = email
     ? await env.DB.prepare("SELECT * FROM subscribers WHERE email=?1").bind(email).first<any>()
@@ -418,7 +437,7 @@ async function emailBroadcast(env: Env, canonicalUrl: string): Promise<void> {
   }
 }
 function renderPostHtml(item: any): string {
-  return `<h1>${escapeHtml(item.title)}</h1>${item.summary ? `<p>${escapeHtml(item.summary)}</p>` : ""}<p><a href="${item.canonical_url}">Read the full post →</a></p><hr/><p><a href="{{{RESEND_UNSUBSCRIBE_URL}}}">Unsubscribe</a></p>`;
+  return `<h1>${escapeHtml(item.title)}</h1>${item.summary ? `<p>${escapeHtml(item.summary)}</p>` : ""}<p><a href="${escapeHtml(item.canonical_url)}">Read the full post →</a></p><hr/><p><a href="{{{RESEND_UNSUBSCRIBE_URL}}}">Unsubscribe</a></p>`;
 }
 function escapeHtml(s: string): string {
   return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
@@ -491,6 +510,9 @@ async function adminImport(req: Request, env: Env): Promise<Response> {
        ON CONFLICT(email) DO UPDATE SET wallet=COALESCE(?3,wallet)
        ` // note: wallet-only rows rely on ON CONFLICT(wallet); handled by two-pass import script
     ).bind(id, email, wallet, salt, s.source || "import", now()).run().catch(() => {});
+    // Mirror active email rows into the Resend audience so D1 and the audience can't drift
+    // (the manual blast targets the Resend audience, not a D1 query).
+    if (email) await resendUpsertContact(env, email, false).catch(() => {});
     ins++;
   }
   return json({ ok: true, imported: ins });
@@ -549,7 +571,7 @@ export class Poller {
     const rows = (await this.env.DB.prepare("SELECT canonical_url,title,summary,published FROM items ORDER BY published DESC LIMIT 50").all<any>()).results || [];
     const items = rows.map((r) => ({ title: r.title, url: r.canonical_url, summary: r.summary, date_published: new Date(r.published).toISOString() }));
     await this.env.FEED_CACHE.put("rendered:feed.json", JSON.stringify({ version: "https://jsonfeed.org/version/1.1", title: "All of Gökhan — unified", home_page_url: "https://gokhanturhan.com", feed_url: "https://api.gokhan.vc/feed.json", items }));
-    const xmlItems = rows.map((r) => `    <item><title>${escapeHtml(r.title)}</title><link>${r.canonical_url}</link><guid isPermaLink="true">${r.canonical_url}</guid><pubDate>${new Date(r.published).toUTCString()}</pubDate>${r.summary ? `<description>${escapeHtml(r.summary)}</description>` : ""}</item>`).join("\n");
+    const xmlItems = rows.map((r) => `    <item><title>${escapeHtml(r.title)}</title><link>${escapeHtml(r.canonical_url)}</link><guid isPermaLink="true">${escapeHtml(r.canonical_url)}</guid><pubDate>${new Date(r.published).toUTCString()}</pubDate>${r.summary ? `<description>${escapeHtml(r.summary)}</description>` : ""}</item>`).join("\n");
     await this.env.FEED_CACHE.put("rendered:feed.xml", `<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>All of Gökhan — unified</title><link>https://gokhanturhan.com</link><description>Personal blog, venture studio, and agent-acceleration bureau — one feed.</description><atom:link href="https://api.gokhan.vc/feed.xml" rel="self" type="application/rss+xml"/>\n${xmlItems}\n</channel></rss>`);
   }
 }
