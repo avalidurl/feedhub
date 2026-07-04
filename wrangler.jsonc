@@ -1,0 +1,50 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "feedhub",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // Custom domain — api.gokhan.vc (NOT *.workers.dev). Bind via the CF dashboard/route after deploy.
+  "routes": [{ "pattern": "api.gokhan.vc", "custom_domain": true }],
+
+  // D1 — system of record. Fill database_id from `wrangler d1 create feedhub`.
+  "d1_databases": [
+    { "binding": "DB", "database_name": "feedhub", "database_id": "PLACEHOLDER_D1_ID", "migrations_dir": "migrations" }
+  ],
+
+  // KV — rendered-feed cache only (staleness harmless). Fill id from `wrangler kv namespace create FEED_CACHE`.
+  "kv_namespaces": [
+    { "binding": "FEED_CACHE", "id": "PLACEHOLDER_KV_ID" }
+  ],
+
+  // Durable Object — single-flight poll/enqueue lock (D1 read-your-writes + serialized execution).
+  "durable_objects": {
+    "bindings": [{ "name": "POLLER", "class_name": "Poller" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Poller"] }],
+
+  // Queues — durable email/XMTP fan-out (at-least-once; the sends ledger makes the effect exactly-once).
+  "queues": {
+    "producers": [
+      { "binding": "EMAIL_Q", "queue": "feedhub-email" },
+      { "binding": "XMTP_Q", "queue": "feedhub-xmtp" }
+    ],
+    "consumers": [
+      { "queue": "feedhub-email", "max_batch_size": 10, "max_retries": 5, "dead_letter_queue": "feedhub-dlq" }
+      // feedhub-xmtp is consumed by the external xmtp-bot service via HTTP pull, not a Worker consumer.
+    ]
+  },
+
+  // Cron — poll the 4 feeds every 10 min (blogs publish rarely; well under the 15-min wall cap).
+  "triggers": { "crons": ["*/10 * * * *"] },
+
+  // Non-secret vars. Secrets (RESEND_API_KEY, UNSUB_SECRET, ADMIN_TOKEN, RESEND_WEBHOOK_SECRET,
+  // RESEND_SEGMENT, TURNSTILE_SECRET) set via `wrangler secret put`.
+  "vars": {
+    "ALLOWED_ORIGINS": "https://ishtar.numetal.xyz,https://numetal.xyz,https://gokhan.vc,https://gokhanturhan.com,https://avalidurl.github.io",
+    "FEEDS": "https://ishtar.numetal.xyz/rss.xml,https://numetal.xyz/feed.xml,https://gokhan.vc/feed.xml,https://gokhanturhan.com/rss.xml",
+    "SENDER": "Gökhan Turhan <newsletter@gokhan.vc>"
+  }
+}
