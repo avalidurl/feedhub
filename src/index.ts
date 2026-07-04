@@ -77,17 +77,76 @@ async function fetchCanonical(link: string): Promise<string> {
   return normalizeUrl(link);
 }
 
-const INDEX_HTML = `<!doctype html><meta charset="utf-8"><title>feedhub</title>
-<style>body{font:15px/1.6 ui-monospace,Menlo,monospace;max-width:680px;margin:6vh auto;padding:0 20px;color:#141414;background:#f7f7f5}h1{font-size:22px}code{background:#e7e7e7;padding:1px 5px}a{color:#e10600}.m{color:#6a6a6a}</style>
-<h1>feedhub <span class="m">· api.gokhan.vc</span></h1>
-<p class="m">The unified newsletter + RSS hub for Gökhan Turhan — one feed across the personal blog, the venture studio, and the agent-acceleration bureau. Cross-posts fold to a single canonical.</p>
-<ul>
-<li><a href="/feed.xml">/feed.xml</a> — unified RSS</li>
-<li><a href="/feed.json">/feed.json</a> — unified JSON Feed</li>
-<li><code>POST /subscribe</code> — email and/or wallet (double opt-in)</li>
-<li><code>GET /unsubscribe?t=…</code> — one-click opt-out</li>
-</ul>
-<p class="m">Sources: ishtar.numetal.xyz · numetal.xyz · gokhan.vc · gokhanturhan.com</p>`;
+// ---------- Aggregate API catalog (api.gokhan.vc is the front door to the whole estate) ----------
+// GET / content-negotiates: JSON for agents, HTML for browsers. GET /_meta always returns this JSON.
+const CATALOG = {
+  name: "api.gokhan.vc",
+  description: "Aggregate API front door for Gökhan Turhan's web estate — one endpoint, many services.",
+  version: "1",
+  docs: "https://api.gokhan.vc/",
+  services: [
+    {
+      id: "feed", title: "Unified cross-site RSS + JSON feed", kind: "local", auth: "none", status: "live",
+      base_path: "/feed",
+      endpoints: [
+        { method: "GET", path: "/feed.xml", desc: "Unified RSS 2.0 across all sites (permanent alias)" },
+        { method: "GET", path: "/feed.json", desc: "Unified JSON Feed 1.1 (permanent alias)" },
+        { method: "GET", path: "/feed/rss.xml", desc: "Namespaced RSS 2.0 (same body)" },
+        { method: "GET", path: "/feed/feed.json", desc: "Namespaced JSON Feed (same body)" },
+      ],
+      sources: ["ishtar.numetal.xyz", "numetal.xyz", "gokhan.vc", "gokhanturhan.com"],
+    },
+    {
+      id: "newsletter", title: "Newsletter subscription (email + XMTP)", kind: "local", auth: "hmac-token", status: "live",
+      base_path: "/newsletter",
+      endpoints: [
+        { method: "POST", path: "/newsletter/subscribe", auth: "none", desc: "Subscribe email and/or wallet (double opt-in)" },
+        { method: "GET", path: "/newsletter/confirm?t=", auth: "hmac-token", desc: "Confirm an email subscription" },
+        { method: "POST", path: "/newsletter/xmtp/subscribe", auth: "wallet-sig (SIWE — enforcement pending)", desc: "Subscribe a wallet for XMTP" },
+        { method: "GET|POST", path: "/newsletter/unsubscribe?t=", auth: "hmac-token", desc: "One-click opt-out (RFC 8058)" },
+      ],
+      legacy_aliases: ["/subscribe", "/confirm", "/unsubscribe", "/xmtp/subscribe", "/webhooks/resend", "/admin/*"],
+      note: "Legacy root paths (/confirm, /unsubscribe, /feed.xml, /feed.json) are permanent — they are baked into already-sent mail and published feeds.",
+    },
+    {
+      id: "numetal", title: "$NUMETAL fee engine + status", kind: "proxy", canonical_host: "numetal.xyz", auth: "none", status: "live",
+      base_path: "/numetal",
+      endpoints: [
+        { method: "GET", path: "/numetal/fees", desc: "Live $NUMETAL snapshot (price, supply, burned, fdv, mcap)" },
+        { method: "GET", path: "/numetal/burns", desc: "Fee-engine burn/buyback events" },
+        { method: "GET", path: "/numetal/status", desc: "Public status.numetal.xyz snapshot" },
+      ],
+    },
+    {
+      id: "ishtar", title: "Ishtar — agentic dating (x402 / MPP)", kind: "link", canonical_host: "api.ishtar.numetal.xyz", auth: "x402 | mpp | wallet-sig", status: "live",
+      base_path: "/ishtar",
+      discovery: { skill: "https://api.ishtar.numetal.xyz/skill", well_known: "https://api.ishtar.numetal.xyz/.well-known/x402", mcp: "https://api.ishtar.numetal.xyz/mcp" },
+      note: "Payments terminate at the canonical host. The gateway LINKS, never proxies — so the x402/MPP 402 realm and payTo stay intact for CDP Bazaar / x402scan / mppscan settlement.",
+    },
+    {
+      id: "heartbench", title: "HeartBench — model-dating leaderboard", kind: "link", canonical_host: "api.ishtar.numetal.xyz", auth: "none", status: "live",
+      base_path: "/heartbench",
+      link: "https://api.ishtar.numetal.xyz/api/heartbench",
+    },
+  ],
+};
+
+function catalogHtml(): string {
+  const svc = CATALOG.services.map((s) => {
+    const eps = ("endpoints" in s && s.endpoints ? s.endpoints : []).map((e: any) =>
+      `<li><code>${e.method} ${e.path}</code> <span class="m">— ${e.desc}${e.auth && e.auth !== "none" ? ` · <em>${e.auth}</em>` : ""}</span></li>`).join("");
+    const link = ("link" in s && s.link) ? s.link : (("canonical_host" in s && s.canonical_host && s.kind === "link") ? `https://${s.canonical_host}/` : "");
+    return `<section><h2>${escapeHtml(s.title)} <span class="tag">${s.kind}</span></h2>` +
+      (("note" in s && s.note) ? `<p class="m">${escapeHtml(String(s.note))}</p>` : "") +
+      (eps ? `<ul>${eps}</ul>` : (link ? `<p><a href="${link}">${link}</a></p>` : "")) + `</section>`;
+  }).join("");
+  return `<!doctype html><meta charset="utf-8"><title>api.gokhan.vc</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font:15px/1.65 ui-monospace,Menlo,monospace;max-width:720px;margin:6vh auto;padding:0 20px;color:#141414;background:#f7f7f5}h1{font-size:22px;margin-bottom:2px}h2{font-size:15px;margin:26px 0 6px;border-top:1px solid #ddd;padding-top:18px}code{background:#e7e7e7;padding:1px 5px;font-size:13px}a{color:#e10600}.m{color:#6a6a6a}em{color:#8a5a00;font-style:normal}ul{padding-left:18px}.tag{font-size:10px;background:#141414;color:#f7f7f5;padding:1px 6px;vertical-align:middle;text-transform:uppercase;letter-spacing:.05em}</style>
+<h1>api.gokhan.vc</h1>
+<p class="m">${escapeHtml(CATALOG.description)} <br>Machine catalog: <a href="/_meta">/_meta</a> · Health: <a href="/health">/health</a></p>
+${svc}`;
+}
 
 // ---------- HMAC unsubscribe token (signature IS the authorization) ----------
 async function hmac(key: string, msg: string): Promise<string> {
@@ -139,26 +198,46 @@ function cors(env: Env, req: Request): Record<string, string> {
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
-    const p = url.pathname;
+    // Trailing-slash-insensitive (except root). Everything routes off `rawp`.
+    const rawp = url.pathname.replace(/\/+$/, "") || "/";
     const co = cors(env, req);
-    if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: { ...co, "Access-Control-Allow-Methods": "GET,POST,OPTIONS", "Access-Control-Allow-Headers": "content-type" } });
+    if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: { ...co, "Access-Control-Allow-Methods": "GET,POST,OPTIONS", "Access-Control-Allow-Headers": "content-type,authorization" } });
 
-    // ---- unified feed (served from KV cache) ----
-    if (p === "/feed.xml") return kvFeed(env, "rendered:feed.xml", "application/rss+xml; charset=utf-8", co);
-    if (p === "/feed.json") return kvFeed(env, "rendered:feed.json", "application/feed+json; charset=utf-8", co);
+    // ===== gateway meta =====
+    if (rawp === "/health") return json({ ok: true, service: "api.gokhan.vc" }, 200, co);
+    if (rawp === "/_meta") return json(CATALOG, 200, co);
+    if (rawp === "/" || rawp === "/index.html") {
+      if ((req.headers.get("Accept") || "").includes("text/html"))
+        return new Response(catalogHtml(), { status: 200, headers: { "content-type": "text/html; charset=utf-8", ...co } });
+      return json(CATALOG, 200, co);
+    }
 
-    // ---- subscribe (email and/or wallet); simple form body = no CORS preflight ----
+    // ===== feed (read side) — /feed.xml + /feed.json are PERMANENT load-bearing aliases =====
+    if (rawp === "/feed.xml" || rawp === "/feed/rss.xml") return kvFeed(env, "rendered:feed.xml", "application/rss+xml; charset=utf-8", co);
+    if (rawp === "/feed.json" || rawp === "/feed/feed.json") return kvFeed(env, "rendered:feed.json", "application/feed+json; charset=utf-8", co);
+    if (rawp === "/feed") return json({ rss: "https://api.gokhan.vc/feed.xml", json: "https://api.gokhan.vc/feed.json" }, 200, co);
+
+    // ===== numetal (proxy, short-KV-cached) =====
+    if (rawp === "/numetal/fees") return proxyJson(env, co, "https://numetal.xyz/fees/data", "proxy:numetal:fees");
+    if (rawp === "/numetal/burns") return proxyJson(env, co, "https://numetal.xyz/fees/events", "proxy:numetal:burns");
+    if (rawp === "/numetal/status") return proxyJson(env, co, "https://status.numetal.xyz/status.json", "proxy:numetal:status");
+
+    // ===== ishtar / heartbench — LINK, never proxy (keeps x402/MPP settlement realm intact) =====
+    if (rawp === "/ishtar") return Response.redirect("https://api.ishtar.numetal.xyz/", 302);
+    if (rawp === "/heartbench") return Response.redirect("https://api.ishtar.numetal.xyz/api/heartbench", 302);
+
+    // ===== newsletter service descriptor =====
+    if (rawp === "/newsletter") return json(CATALOG.services.find((s) => s.id === "newsletter"), 200, co);
+
+    // ===== newsletter — strip the /newsletter/* prefix and fall through to the legacy handlers.
+    // Legacy root paths stay live too, so any URL already baked into sent mail keeps working. =====
+    const p = rawp.startsWith("/newsletter/") ? rawp.slice("/newsletter".length) : rawp;
+
     if (p === "/subscribe" && req.method === "POST") return subscribe(req, env, co);
     if (p === "/confirm" && req.method === "GET") return confirm(url, env);
     if (p === "/xmtp/subscribe" && req.method === "POST") return xmtpSubscribe(req, env, co);
-
-    // ---- unsubscribe (GET page + RFC 8058 POST one-click) ----
     if (p === "/unsubscribe") return unsubscribe(req, url, env);
-
-    // ---- Resend webhook (bounce/complaint reconciliation) ----
     if (p === "/webhooks/resend" && req.method === "POST") return resendWebhook(req, env);
-
-    // ---- admin (bearer-gated) ----
     if (p === "/admin/status") return adminStatus(req, env);
     if (p === "/admin/import" && req.method === "POST") return adminImport(req, env);
     if (p === "/admin/poll" && req.method === "POST") {
@@ -167,9 +246,6 @@ export default {
       return json({ ok: true, polled: true });
     }
 
-    if (p === "/" || p === "/index.html") {
-      return new Response(INDEX_HTML, { status: 200, headers: { "content-type": "text/html; charset=utf-8", ...co } });
-    }
     return new Response("Not found", { status: 404, headers: co });
   },
 
@@ -200,9 +276,27 @@ async function kvFeed(env: Env, key: string, ctype: string, co: Record<string, s
   return new Response(body, { headers: { "content-type": ctype, "cache-control": "public, max-age=300", ...co } });
 }
 
+// Thin read-only proxy for public upstream JSON (numetal fees/burns/status). 60s KV cache so a
+// burst on api.gokhan.vc never hammers the origin; upstream stays the source of truth.
+async function proxyJson(env: Env, co: Record<string, string>, upstream: string, cacheKey: string): Promise<Response> {
+  let body = await env.FEED_CACHE.get(cacheKey);
+  if (body === null) {
+    try {
+      const r = await fetch(upstream, { headers: { "User-Agent": "api.gokhan.vc/1.0" } });
+      if (!r.ok) return json({ error: "upstream_status", status: r.status, upstream }, 502, co);
+      body = await r.text();
+      await env.FEED_CACHE.put(cacheKey, body, { expirationTtl: 60 });
+    } catch {
+      return json({ error: "upstream_unreachable", upstream }, 502, co);
+    }
+  }
+  return new Response(body, { headers: { "content-type": "application/json; charset=utf-8", "cache-control": "public, max-age=60", ...co } });
+}
+
 // ---------- subscribe ----------
 async function subscribe(req: Request, env: Env, co: Record<string, string>): Promise<Response> {
-  const form = await req.formData();
+  let form: FormData;
+  try { form = await req.formData(); } catch { return json({ error: "expected form-encoded body" }, 400, co); }
   const email = (form.get("email") as string || "").trim().toLowerCase() || null;
   const wallet = (form.get("wallet") as string || "").trim().toLowerCase() || null;
   const site = (form.get("site") as string || "unknown").trim();
@@ -331,8 +425,15 @@ function escapeHtml(s: string): string {
 }
 
 async function resendWebhook(req: Request, env: Env): Promise<Response> {
-  // TODO: verify Svix signature with RESEND_WEBHOOK_SECRET before trusting.
-  const evt = await req.json().catch(() => ({})) as any;
+  const raw = await req.text();
+  // Resend signs webhooks via Svix. Fail CLOSED: with no secret set the endpoint refuses to
+  // mutate state at all (else anyone could POST a fake bounce to unsubscribe a victim). To enable
+  // bounce/complaint reconciliation, register the Resend webhook and `wrangler secret put RESEND_WEBHOOK_SECRET`.
+  if (!env.RESEND_WEBHOOK_SECRET) return new Response("webhook not configured", { status: 503 });
+  const ok = await verifySvix(env.RESEND_WEBHOOK_SECRET, req.headers, raw).catch(() => false);
+  if (!ok) return new Response("bad signature", { status: 401 });
+  let evt: any = {};
+  try { evt = JSON.parse(raw); } catch { return new Response(null, { status: 200 }); }
   const type = evt?.type, email = evt?.data?.email || evt?.data?.to?.[0];
   if (email && (type === "email.bounced" || type === "email.complained")) {
     await env.DB.prepare("UPDATE subscribers SET email_status=?2 WHERE email=?1").bind(String(email).toLowerCase(), type === "email.complained" ? "unsub" : "bounced").run();
@@ -340,9 +441,26 @@ async function resendWebhook(req: Request, env: Env): Promise<Response> {
   return new Response(null, { status: 200 });
 }
 
+// Svix webhook signature (Resend uses Svix). secret = "whsec_<base64>"; signed content =
+// `${svix-id}.${svix-timestamp}.${rawBody}`; header carries space-separated "v1,<b64sig>" entries.
+async function verifySvix(secret: string, headers: Headers, body: string): Promise<boolean> {
+  const id = headers.get("svix-id"), ts = headers.get("svix-timestamp"), sigHeader = headers.get("svix-signature");
+  if (!id || !ts || !sigHeader) return false;
+  const rawSecret = secret.startsWith("whsec_") ? secret.slice(6) : secret;
+  const keyBytes = Uint8Array.from(atob(rawSecret), (c) => c.charCodeAt(0));
+  const key = await crypto.subtle.importKey("raw", keyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, enc.encode(`${id}.${ts}.${body}`)));
+  const expected = btoa(String.fromCharCode(...mac));
+  for (const part of sigHeader.split(" ")) {
+    const [ver, s] = part.split(",");
+    if (ver === "v1" && s && timingSafeEq(s, expected)) return true;
+  }
+  return false;
+}
+
 // ---------- admin ----------
 function bearerOk(req: Request, env: Env): boolean {
-  return (req.headers.get("Authorization") || "") === "Bearer " + env.ADMIN_TOKEN;
+  return timingSafeEq(req.headers.get("Authorization") || "", "Bearer " + env.ADMIN_TOKEN);
 }
 async function adminStatus(req: Request, env: Env): Promise<Response> {
   if (!bearerOk(req, env)) return new Response("unauthorized", { status: 401 });
