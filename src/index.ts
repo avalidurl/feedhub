@@ -417,6 +417,21 @@ async function resendUpsertContact(env: Env, email: string, unsubscribed: boolea
     body: JSON.stringify({ email, unsubscribed }),
   });
 }
+// Per-brand newsletter sender display names — always "… by Gökhan Turhan". Same verified
+// address (newsletter@gokhan.vc) so SPF/DKIM/DMARC alignment is unchanged; only the display name
+// varies by the post's origin feed.
+const BRAND_SENDER: Record<string, string> = {
+  ishtar: "Ishtar by Gökhan Turhan",
+  numetal: "Numetal Dispatch by Gökhan Turhan",
+  atelier: "Brief by Atelier Gökhan Turhan VC",
+  personal: "Journal by Gökhan Turhan",
+};
+function senderFor(originFeed: string, env: Env): string {
+  const name = BRAND_SENDER[originFeed] || "Gökhan Turhan";
+  const m = env.SENDER.match(/<([^>]+)>/);
+  return `${name} <${m ? m[1] : "newsletter@gokhan.vc"}>`;
+}
+
 async function emailBroadcast(env: Env, canonicalUrl: string): Promise<void> {
   // Claim the broadcasts row — exactly one broadcast per post.
   const claim = await env.DB.prepare(
@@ -430,7 +445,7 @@ async function emailBroadcast(env: Env, canonicalUrl: string): Promise<void> {
     method: "POST",
     headers: { Authorization: "Bearer " + env.RESEND_API_KEY, "content-type": "application/json", "User-Agent": "feedhub/1.0" },
     body: JSON.stringify({
-      audience_id: env.RESEND_SEGMENT, from: env.SENDER, subject: item.title,
+      audience_id: env.RESEND_SEGMENT, from: senderFor(item.origin_feed, env), subject: item.title,
       html: renderPostHtml(item), text: `${item.title}\n\n${item.summary || ""}\n\n${item.canonical_url}\n\nUnsubscribe: {{{RESEND_UNSUBSCRIBE_URL}}}`,
     }),
   }).then((r) => r.json() as any);
