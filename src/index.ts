@@ -7,6 +7,7 @@
  *  - XMTP fans out via the external xmtp-bot service (MLS can't run in a Worker) pulling feedhub-xmtp.
  *  - Unsubscribe is a tamper-proof HMAC signed with a Worker secret + per-subscriber salt.
  */
+import { recoverMessageAddress } from "viem";
 
 export interface Env {
   DB: D1Database;
@@ -21,6 +22,7 @@ export interface Env {
   // secrets:
   UNSUB_SECRET: string;
   ADMIN_TOKEN: string;
+  XMTP_BOT_TOKEN: string; // least-privilege bearer for the xmtp-bot (only /admin/xmtp/*)
   RESEND_API_KEY: string;
   RESEND_SEGMENT: string;
   RESEND_WEBHOOK_SECRET: string;
@@ -367,11 +369,25 @@ async function confirm(url: URL, env: Env): Promise<Response> {
   return new Response("You're subscribed. Thank you. You can close this tab.", { status: 200, headers: { "content-type": "text/plain" } });
 }
 
+const xmtpSubMessage = (wallet: string) => `Subscribe ${wallet} to the Gökhan Turhan newsletter over XMTP.`;
+
 async function xmtpSubscribe(req: Request, env: Env, co: Record<string, string>): Promise<Response> {
   const b = await req.json().catch(() => ({})) as any;
   const wallet = (b.wallet || "").trim().toLowerCase();
-  // TODO: verify SIWE signature (b.signature over the SIWE message) proving control of `wallet`.
+  const signature = (b.signature || "").trim();
   if (!/^0x[a-f0-9]{40}$/.test(wallet)) return json({ error: "bad wallet" }, 400, co);
+  // Prove wallet ownership (EIP-191) — without this, anyone could enroll third-party wallets and
+  // flood the table. Only the wallet holder can produce this signature; replay just re-subscribes
+  // the same wallet (idempotent), so a static message is sufficient.
+  if (!/^0x[0-9a-fA-F]{130}$/.test(signature)) return json({ error: "signature required" }, 400, co);
+  let recovered = "";
+  try { recovered = (await recoverMessageAddress({ message: xmtpSubMessage(wallet), signature: signature as `0x${string}` })).toLowerCase(); }
+  catch { return json({ error: "bad signature" }, 400, co); }
+  if (recovered !== wallet) return json({ error: "signature does not match wallet" }, 400, co);
+  // Rate-limit the (now-authenticated) write to bound row creation / D1 cost.
+  const ip = req.headers.get("CF-Connecting-IP") || "0";
+  if (!(await rlHit(env, "xmtp:global", 60, 3600)) || !(await rlHit(env, "xmtp:ip:" + ip, 10, 3600)))
+    return json({ error: "rate_limited" }, 429, co);
   const existing = await env.DB.prepare("SELECT id,unsub_token FROM subscribers WHERE wallet=?1").bind(wallet).first<any>();
   const id = existing?.id ?? ulid();
   const salt = existing?.unsub_token ?? b64url(crypto.getRandomValues(new Uint8Array(16)));
@@ -500,6 +516,24 @@ async function verifySvix(secret: string, headers: Headers, body: string): Promi
 function bearerOk(req: Request, env: Env): boolean {
   return timingSafeEq(req.headers.get("Authorization") || "", "Bearer " + env.ADMIN_TOKEN);
 }
+// Constant-time SHA-256 compare — no length or value oracle.
+async function ctEq(a: string, b: string): Promise<boolean> {
+  const [ha, hb] = await Promise.all([
+    crypto.subtle.digest("SHA-256", enc.encode(a)),
+    crypto.subtle.digest("SHA-256", enc.encode(b)),
+  ]);
+  const x = new Uint8Array(ha), y = new Uint8Array(hb);
+  let d = 0;
+  for (let i = 0; i < 32; i++) d |= x[i] ^ y[i];
+  return d === 0;
+}
+// The xmtp-bot's least-privilege gate: accepts the scoped XMTP_BOT_TOKEN OR the full ADMIN_TOKEN,
+// so a bot-container compromise cannot reach /admin/import|poll|status.
+async function botOk(req: Request, env: Env): Promise<boolean> {
+  const got = req.headers.get("Authorization") || "";
+  if (env.XMTP_BOT_TOKEN && (await ctEq(got, "Bearer " + env.XMTP_BOT_TOKEN))) return true;
+  return ctEq(got, "Bearer " + env.ADMIN_TOKEN);
+}
 async function adminStatus(req: Request, env: Env): Promise<Response> {
   if (!bearerOk(req, env)) return new Response("unauthorized", { status: 401 });
   const q = async (sql: string) => (await env.DB.prepare(sql).first<any>()) || {};
@@ -542,7 +576,7 @@ async function adminImport(req: Request, env: Env): Promise<Response> {
 // record + keeps UNSUB_SECRET). feedhub pre-mints each per-recipient xmtp unsub URL so the bot
 // never needs the HMAC secret. Returns the wallet subscribers that are XMTP-active.
 async function adminXmtpRecipients(req: Request, env: Env): Promise<Response> {
-  if (!bearerOk(req, env)) return new Response("unauthorized", { status: 401 });
+  if (!(await botOk(req, env))) return new Response("unauthorized", { status: 401 });
   const rows = (await env.DB.prepare(
     "SELECT id, wallet, unsub_token FROM subscribers WHERE xmtp_status='active' AND wallet IS NOT NULL"
   ).all<{ id: string; wallet: string; unsub_token: string }>()).results || [];
@@ -559,19 +593,24 @@ async function adminXmtpRecipients(req: Request, env: Env): Promise<Response> {
 // `key` occupies the canonical_url slot: a real post URL for fan-out, or a campaign key (e.g.
 // "launch-2026-07") for the one-time blast.
 async function adminXmtpReport(req: Request, env: Env): Promise<Response> {
-  if (!bearerOk(req, env)) return new Response("unauthorized", { status: 401 });
+  if (!(await botOk(req, env))) return new Response("unauthorized", { status: 401 });
   const b = await req.json().catch(() => ({})) as any;
-  const key = String(b.key || "").trim();
+  const key = String(b.key || "").trim().slice(0, 400);
   const results: any[] = Array.isArray(b.results) ? b.results : [];
   if (!key) return json({ error: "key required" }, 400);
+  if (results.length > 1000) return json({ error: "too many results (max 1000)" }, 400);
+  const OK = new Set(["sent", "failed", "skipped", "queued"]);
   let n = 0;
   for (const r of results) {
-    if (!r?.subscriber_id) continue;
+    const sid = String(r?.subscriber_id || "").trim();
+    if (!sid || sid.length > 40) continue;
+    const status = OK.has(r?.status) ? r.status : "sent";
+    // INSERT ... SELECT guards against ghost rows: only writes if the subscriber_id truly exists.
     await env.DB.prepare(
       `INSERT INTO sends (canonical_url, subscriber_id, channel, status, provider_id, attempts, updated_at)
-       VALUES (?1,?2,'xmtp',?3,?4,1,?5)
+       SELECT ?1, ?2, 'xmtp', ?3, ?4, 1, ?5 WHERE EXISTS (SELECT 1 FROM subscribers WHERE id=?2)
        ON CONFLICT(canonical_url,subscriber_id,channel) DO UPDATE SET status=?3, provider_id=?4, attempts=attempts+1, updated_at=?5`
-    ).bind(key, r.subscriber_id, String(r.status || "sent"), r.provider_id || null, now()).run().catch(() => {});
+    ).bind(key, sid, status, r.provider_id ? String(r.provider_id).slice(0, 200) : null, now()).run().catch(() => {});
     n++;
   }
   return json({ ok: true, recorded: n });
@@ -580,7 +619,7 @@ async function adminXmtpReport(req: Request, env: Env): Promise<Response> {
 // Later per-post fan-out: posts latched (notified_at) but with no xmtp send yet. A non-Worker
 // can't HTTP-pull a CF Queue, so the bot pulls work from D1 here instead.
 async function adminXmtpPending(req: Request, env: Env): Promise<Response> {
-  if (!bearerOk(req, env)) return new Response("unauthorized", { status: 401 });
+  if (!(await botOk(req, env))) return new Response("unauthorized", { status: 401 });
   const rows = (await env.DB.prepare(
     `SELECT canonical_url, title, summary FROM items
      WHERE notified_at IS NOT NULL
