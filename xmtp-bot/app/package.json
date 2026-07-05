@@ -1,0 +1,10 @@
+{
+  "name": "feedhub-xmtp-bot-app",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "@xmtp/node-sdk": "6.0.0",
+    "viem": "^2.37.6"
+  }
+}

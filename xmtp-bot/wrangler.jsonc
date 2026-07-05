@@ -1,0 +1,32 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "feedhub-xmtp-bot",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // Public front door so the container can call back for R2 persistence (SELF_URL) and the
+  // operator can trigger control endpoints.
+  "routes": [{ "pattern": "xmtp-bot.gokhan.vc", "custom_domain": true }],
+
+  // The container: single instance (single MLS-DB writer), basic tier (256 MiB is too small for
+  // node + the native XMTP addon).
+  "containers": [
+    { "image": "./Dockerfile", "class_name": "XmtpBot", "max_instances": 1, "instance_type": "basic" }
+  ],
+  "durable_objects": { "bindings": [{ "name": "XMTP_BOT", "class_name": "XmtpBot" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["XmtpBot"] }],
+
+  // R2 backup store for the XMTP MLS SQLite DB (ephemeral container disk => restore on boot, back up after).
+  "r2_buckets": [{ "binding": "DB_BUCKET", "bucket_name": "feedhub-xmtp-db" }],
+
+  // Non-secret vars. Secrets (XMTP_WALLET_KEY, XMTP_DB_ENCRYPTION_KEY, FEEDHUB_ADMIN_TOKEN,
+  // ADMIN_TOKEN, PERSIST_TOKEN) via `wrangler secret put`. LAUNCH_ARMED gates the real blast.
+  "vars": {
+    "XMTP_ENV": "production",
+    "FEEDHUB_ADMIN_URL": "https://api.gokhan.vc",
+    "SELF_URL": "https://xmtp-bot.gokhan.vc",
+    "LAUNCH_ARMED": "0"
+  }
+}
