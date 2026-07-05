@@ -150,6 +150,31 @@ function catalogHtml(): string {
 ${svc}`;
 }
 
+// ---------- subscribe form (hosted on the gateway; native POST, no JS → works under any site CSP) ----------
+const PAGE_CSS = `body{font:15px/1.6 ui-monospace,Menlo,monospace;max-width:520px;margin:12vh auto;padding:0 24px;color:#141414;background:#f7f7f5}h1{font-size:22px;margin:0 0 6px}.m{color:#6a6a6a;font-size:13px}form{margin:22px 0}input[type=email]{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #141414;background:#fff;font:inherit;margin-bottom:10px}button{padding:11px 20px;border:1px solid #141414;background:#141414;color:#f7f7f5;font:inherit;cursor:pointer}button:hover{background:#e10600;border-color:#e10600}a{color:#e10600}`;
+function subscribeForm(site: string): string {
+  const s = escapeHtml(site);
+  return `<!doctype html><meta charset="utf-8"><title>Subscribe — Gökhan Turhan</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><style>${PAGE_CSS}</style>
+<h1>Subscribe</h1>
+<p class="m">One newsletter across everything I make — Ishtar, Numetal, the journal, the brief. Signal only.</p>
+<form method="POST" action="https://api.gokhan.vc/newsletter/subscribe">
+  <input type="email" name="email" required autofocus placeholder="you@email.com" autocomplete="email">
+  <input type="hidden" name="site" value="${s}">
+  <button type="submit">Subscribe</button>
+</form>
+<p class="m">Double opt-in — you'll get one email to confirm. Unsubscribe anytime, one click.</p>`;
+}
+function subscribeThanks(): string {
+  return `<!doctype html><meta charset="utf-8"><title>Almost there — Gökhan Turhan</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><style>${PAGE_CSS}</style>
+<h1>Almost there.</h1>
+<p>Check your inbox for a confirmation link — click it and you're in.</p>
+<p class="m">Didn't get it? Give it a minute, then check spam. <a href="https://api.gokhan.vc/newsletter/subscribe">Try again</a>.</p>`;
+}
+const htmlResp = (body: string, co: Record<string, string>, status = 200) =>
+  new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8", ...co } });
+
 // ---------- HMAC unsubscribe token (signature IS the authorization) ----------
 async function hmac(key: string, msg: string): Promise<string> {
   const k = await crypto.subtle.importKey("raw", enc.encode(key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
@@ -246,6 +271,7 @@ export default {
     // Legacy root paths stay live too, so any URL already baked into sent mail keeps working. =====
     const p = rawp.startsWith("/newsletter/") ? rawp.slice("/newsletter".length) : rawp;
 
+    if (p === "/subscribe" && req.method === "GET") return htmlResp(subscribeForm(url.searchParams.get("site") || "web"), co);
     if (p === "/subscribe" && req.method === "POST") return subscribe(req, env, co);
     if (p === "/confirm" && req.method === "GET") return confirm(url, env);
     if (p === "/xmtp/subscribe" && req.method === "POST") return xmtpSubscribe(req, env, co);
@@ -312,6 +338,7 @@ async function proxyJson(env: Env, co: Record<string, string>, upstream: string,
 
 // ---------- subscribe ----------
 async function subscribe(req: Request, env: Env, co: Record<string, string>): Promise<Response> {
+  const wantsHtml = (req.headers.get("Accept") || "").includes("text/html");
   let form: FormData;
   try { form = await req.formData(); } catch { return json({ error: "expected form-encoded body" }, 400, co); }
   const email = (form.get("email") as string || "").trim().toLowerCase() || null;
@@ -353,6 +380,7 @@ async function subscribe(req: Request, env: Env, co: Record<string, string>): Pr
     const token = await mintUnsub(env, id, salt, "email"); // reuse HMAC as the confirm proof
     const link = `https://api.gokhan.vc/confirm?t=${encodeURIComponent(token)}`;
     await sendConfirm(env, email, link);
+    if (wantsHtml) return htmlResp(subscribeThanks(), co);
     return json({ ok: true, status: "confirm-sent" }, 200, co);
   }
   // Wallet-only → tell the client to complete SIWE at /xmtp/subscribe
