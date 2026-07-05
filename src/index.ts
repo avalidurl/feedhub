@@ -288,6 +288,7 @@ export default {
     if (p === "/admin/xmtp/recipients") return adminXmtpRecipients(req, env);
     if (p === "/admin/xmtp/report" && req.method === "POST") return adminXmtpReport(req, env);
     if (p === "/admin/xmtp/pending") return adminXmtpPending(req, env);
+    if (p === "/admin/xmtp/sent") return adminXmtpSent(req, env);
 
     return new Response("Not found", { status: 404, headers: co });
   },
@@ -655,6 +656,17 @@ async function adminXmtpPending(req: Request, env: Env): Promise<Response> {
      ORDER BY published DESC LIMIT 20`
   ).all<any>()).results || [];
   return json({ count: rows.length, pending: rows });
+}
+
+// Subscriber ids already delivered for a campaign key — lets the bot make a launch/fanout idempotent
+// (skip already-sent, retry only failures) so a re-fire never double-DMs anyone.
+async function adminXmtpSent(req: Request, env: Env): Promise<Response> {
+  if (!(await botOk(req, env))) return new Response("unauthorized", { status: 401 });
+  const key = new URL(req.url).searchParams.get("key") || "";
+  const rows = (await env.DB.prepare(
+    "SELECT subscriber_id FROM sends WHERE channel='xmtp' AND canonical_url=?1 AND status='sent'"
+  ).bind(key).all<{ subscriber_id: string }>()).results || [];
+  return json({ sent: rows.map((r) => r.subscriber_id) });
 }
 
 // ---------- Poller Durable Object (single-flight) ----------

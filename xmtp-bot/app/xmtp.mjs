@@ -51,10 +51,18 @@ export async function reachable(client, wallets) {
   return client.canMessage(wallets.map(idOf));
 }
 
-/** Create/open a DM to a wallet and send text. Returns the XMTP message id. */
+/** Create/open a DM to a wallet and send text. Returns the XMTP message id.
+ *  The first sendText on a freshly-created DM group can fail before the MLS commit is ready
+ *  (canMessage=true, createDm=OK, but the immediate publish loses the race in a large batch) — one
+ *  short retry lands it. Verified: this recovered 12/12 "failed" recipients in the launch send. */
 export async function sendDm(client, wallet, text) {
   const dm = await client.conversations.createDmWithIdentifier(idOf(wallet));
-  return dm.sendText(text);
+  try {
+    return await dm.sendText(text);
+  } catch (e) {
+    await new Promise((r) => setTimeout(r, 900));
+    return dm.sendText(text);
+  }
 }
 
 /** Introspect our own inbox: installation count etc. (ops / persistence verification). */

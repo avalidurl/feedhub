@@ -64,6 +64,13 @@ async function reportSends(key, results) {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Subscriber ids already delivered for this campaign — makes launch-blast idempotent (retry failures,
+// never double-DM a delivered recipient).
+async function fetchSent(key) {
+  const r = await fetch(`${FEEDHUB_ADMIN_URL}/admin/xmtp/sent?key=${encodeURIComponent(key)}`, { headers: { Authorization: "Bearer " + FEEDHUB_ADMIN_TOKEN } });
+  return r.ok ? new Set((await r.json()).sent || []) : new Set();
+}
+
 // Resolve every recipient's wallet (0x as-is, .eth → address, else null) once per run.
 async function resolvedRecipients() {
   const raw = await fetchRecipients();
@@ -85,10 +92,13 @@ async function launchBlast() {
   if (LAUNCH_ARMED !== "1") throw new Error("not armed (LAUNCH_ARMED != 1)");
   const c = await ensureClient();
   const recips = await resolvedRecipients();
+  const alreadySent = await fetchSent(LAUNCH_KEY); // idempotent: never re-DM an already-delivered wallet
   const valid = recips.filter((r) => r.address);
   const map = await reachable(c, valid.map((r) => r.address));
   const results = [];
+  let already = 0;
   for (const r of recips) {
+    if (alreadySent.has(r.subscriber_id)) { already++; continue; }
     if (!r.address || map.get(r.address) !== true) { results.push({ subscriber_id: r.subscriber_id, status: "skipped" }); continue; }
     try {
       const id = await sendDm(c, r.address, launchMessage(r.unsub_url));
@@ -101,7 +111,7 @@ async function launchBlast() {
   }
   await reportSends(LAUNCH_KEY, results);
   const by = (s) => results.filter((x) => x.status === s).length;
-  return { total: recips.length, sent: by("sent"), skipped: by("skipped"), failed: by("failed") };
+  return { total: recips.length, already_delivered: already, sent_now: by("sent"), skipped: by("skipped"), failed: by("failed") };
 }
 
 const send = (res, code, obj) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); };
