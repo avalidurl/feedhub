@@ -256,6 +256,10 @@ export default {
       await env.POLLER.get(env.POLLER.idFromName("singleton")).fetch("https://poller/run");
       return json({ ok: true, polled: true });
     }
+    // xmtp-bot integration (admin-gated; the external CF-Container bot calls these over HTTPS)
+    if (p === "/admin/xmtp/recipients") return adminXmtpRecipients(req, env);
+    if (p === "/admin/xmtp/report" && req.method === "POST") return adminXmtpReport(req, env);
+    if (p === "/admin/xmtp/pending") return adminXmtpPending(req, env);
 
     return new Response("Not found", { status: 404, headers: co });
   },
@@ -516,6 +520,59 @@ async function adminImport(req: Request, env: Env): Promise<Response> {
     ins++;
   }
   return json({ ok: true, imported: ins });
+}
+
+// ---------- xmtp-bot integration (admin-gated) ----------
+// The external CF-Container XMTP bot pulls its recipient list here (feedhub stays the system of
+// record + keeps UNSUB_SECRET). feedhub pre-mints each per-recipient xmtp unsub URL so the bot
+// never needs the HMAC secret. Returns the wallet subscribers that are XMTP-active.
+async function adminXmtpRecipients(req: Request, env: Env): Promise<Response> {
+  if (!bearerOk(req, env)) return new Response("unauthorized", { status: 401 });
+  const rows = (await env.DB.prepare(
+    "SELECT id, wallet, unsub_token FROM subscribers WHERE xmtp_status='active' AND wallet IS NOT NULL"
+  ).all<{ id: string; wallet: string; unsub_token: string }>()).results || [];
+  const recipients = [];
+  for (const r of rows) {
+    const token = await mintUnsub(env, r.id, r.unsub_token, "xmtp");
+    recipients.push({ subscriber_id: r.id, wallet: r.wallet, unsub_url: `https://api.gokhan.vc/unsubscribe?t=${encodeURIComponent(token)}` });
+  }
+  return json({ count: recipients.length, recipients });
+}
+
+// The bot reports per-recipient results here → writes the sends ledger (channel='xmtp'). The
+// composite PK (canonical_url,subscriber_id,channel) makes a re-run idempotent per recipient.
+// `key` occupies the canonical_url slot: a real post URL for fan-out, or a campaign key (e.g.
+// "launch-2026-07") for the one-time blast.
+async function adminXmtpReport(req: Request, env: Env): Promise<Response> {
+  if (!bearerOk(req, env)) return new Response("unauthorized", { status: 401 });
+  const b = await req.json().catch(() => ({})) as any;
+  const key = String(b.key || "").trim();
+  const results: any[] = Array.isArray(b.results) ? b.results : [];
+  if (!key) return json({ error: "key required" }, 400);
+  let n = 0;
+  for (const r of results) {
+    if (!r?.subscriber_id) continue;
+    await env.DB.prepare(
+      `INSERT INTO sends (canonical_url, subscriber_id, channel, status, provider_id, attempts, updated_at)
+       VALUES (?1,?2,'xmtp',?3,?4,1,?5)
+       ON CONFLICT(canonical_url,subscriber_id,channel) DO UPDATE SET status=?3, provider_id=?4, attempts=attempts+1, updated_at=?5`
+    ).bind(key, r.subscriber_id, String(r.status || "sent"), r.provider_id || null, now()).run().catch(() => {});
+    n++;
+  }
+  return json({ ok: true, recorded: n });
+}
+
+// Later per-post fan-out: posts latched (notified_at) but with no xmtp send yet. A non-Worker
+// can't HTTP-pull a CF Queue, so the bot pulls work from D1 here instead.
+async function adminXmtpPending(req: Request, env: Env): Promise<Response> {
+  if (!bearerOk(req, env)) return new Response("unauthorized", { status: 401 });
+  const rows = (await env.DB.prepare(
+    `SELECT canonical_url, title, summary FROM items
+     WHERE notified_at IS NOT NULL
+       AND canonical_url NOT IN (SELECT DISTINCT canonical_url FROM sends WHERE channel='xmtp')
+     ORDER BY published DESC LIMIT 20`
+  ).all<any>()).results || [];
+  return json({ count: rows.length, pending: rows });
 }
 
 // ---------- Poller Durable Object (single-flight) ----------
