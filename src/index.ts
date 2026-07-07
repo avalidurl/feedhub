@@ -9,7 +9,12 @@
  */
 import { recoverMessageAddress } from "viem";
 
-export interface Env {
+import type { PaymentEnv } from "./payments/env";
+import { fetchLlmsAggregate, llmsCombinedText, SOCIAL_CATALOG } from "./estate";
+import { listBlogSites, readBlogPost } from "./blog";
+import { handleAgentEmail } from "./agent-email";
+
+export interface Env extends PaymentEnv {
   DB: D1Database;
   FEED_CACHE: KVNamespace;
   POLLER: DurableObjectNamespace;
