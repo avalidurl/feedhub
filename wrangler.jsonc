@@ -43,9 +43,15 @@
   // Non-secret vars. Secrets (RESEND_API_KEY, UNSUB_SECRET, ADMIN_TOKEN, RESEND_WEBHOOK_SECRET,
   // RESEND_SEGMENT, TURNSTILE_SECRET) set via `wrangler secret put`.
   "vars": {
-    "ALLOWED_ORIGINS": "https://ishtar.numetal.xyz,https://numetal.xyz,https://gokhan.vc,https://gokhanturhan.com,https://avalidurl.github.io",
+    "ALLOWED_ORIGINS": "https://ishtar.numetal.xyz,https://numetal.xyz,https://www.numetal.xyz,https://gokhan.vc,https://www.gokhan.vc,https://gokhanturhan.com,https://www.gokhanturhan.com,https://avalidurl.github.io",
     "FEEDS": "https://ishtar.numetal.xyz/rss.xml,https://numetal.xyz/feed.xml,https://gokhan.vc/feed.xml,https://gokhanturhan.com/rss.xml",
     "SENDER": "Gökhan Turhan <newsletter@gokhan.vc>",
-    "LAUNCH": "off"
+    "AGENT_EMAIL_SENDER": "Agent Mail <newsletter@gokhan.vc>",
+    "LAUNCH": "off",
+    "PUBLIC_API_URL": "https://api.gokhan.vc",
+    "X402_MODE": "mainnet",
+    "PAY_TO": "0x36de990133D36d7E3DF9a820aA3eDE5a2320De71",
+    "MPP_RECIPIENT": "0x3e267aA9439C82FfB36078676E67901a1ca6D352",
+    "MPP_ENABLED": "true"
   }
 }
