@@ -117,7 +117,7 @@ export function buildOpenApi(env: Env) {
       description:
         "Aggregate API front door for Gökhan Turhan's web estate — unified feeds, blog reader, llms.txt index, $NUMETAL status, and paid agent cold email.",
       "x-guidance":
-        "Start at GET / or GET /_meta for the full service catalog. Read unified RSS/JSON feeds at GET /feed.xml or GET /feed.json. Fetch blog posts as JSON with GET /blog/{site}/{slug} (sites: ishtar, numetal, gokhanvc, memex). Aggregate llms.txt files at GET /llms or GET /llms.txt. Social/contact links at GET /social. Live $NUMETAL metrics at GET /numetal/fees, /numetal/burns, /numetal/status. To reach the founder by email, POST /agent/email with JSON {subject, body} — $1.00 USDC per message via x402 on Base or MPP on Tempo; a bare POST returns 402 with both payment challenges. Use recipient=contact (default) or investments. Ishtar dating API payments terminate at api.ishtar.numetal.xyz (this gateway links, never proxies paid surfaces).",
+        "Start at GET / or GET /_meta for the full service catalog. Read unified RSS/JSON feeds at GET /feed.xml or GET /feed.json (aliases: /feed/rss.xml, /feed/feed.json). Fetch blog posts as JSON with GET /blog/{site}/{slug} (sites: ishtar, numetal, gokhanvc, memex). Aggregate llms.txt files at GET /llms or GET /llms.txt. Social/contact links at GET /social. Live $NUMETAL metrics at GET /numetal/fees, /numetal/burns, /numetal/status. Newsletter subscribe at POST /newsletter/subscribe (free). To reach the founder by email, POST /agent/email with JSON {subject, body} — $1.00 USDC per message via x402 on Base or MPP on Tempo; a bare POST returns 402 with both payment challenges. Use recipient=contact (default) or investments. Ishtar dating API payments terminate at api.ishtar.numetal.xyz (this gateway links, never proxies paid surfaces).",
       contact: { email: "contact@gokhanturhan.com", url: "https://gokhan.vc" },
     },
     ...ownershipDiscovery(env),
@@ -202,6 +202,48 @@ export function buildOpenApi(env: Env) {
           tags: ["Feed"],
           security: [],
           responses: { "200": { description: "JSON Feed 1.1.", content: { "application/feed+json": { schema: { type: "object" } } } } },
+        },
+      },
+      "/feed/rss.xml": {
+        get: {
+          operationId: "unifiedRssNamespaced",
+          summary: "Namespaced RSS 2.0 (same body as /feed.xml)",
+          tags: ["Feed"],
+          security: [],
+          responses: { "200": { description: "RSS 2.0 XML.", content: { "application/rss+xml": { schema: { type: "string" } } } } },
+        },
+      },
+      "/feed/feed.json": {
+        get: {
+          operationId: "unifiedJsonFeedNamespaced",
+          summary: "Namespaced JSON Feed (same body as /feed.json)",
+          tags: ["Feed"],
+          security: [],
+          responses: { "200": { description: "JSON Feed 1.1.", content: { "application/feed+json": { schema: { type: "object" } } } } },
+        },
+      },
+      "/openapi.json": {
+        get: {
+          operationId: "openApiDiscovery",
+          summary: "OpenAPI 3.1 discovery document",
+          tags: ["Discovery"],
+          security: [],
+          responses: { "200": jsonResp("OpenAPI 3.1 specification.", { type: "object" }) },
+        },
+      },
+      "/.well-known/x402": {
+        get: {
+          operationId: "x402DiscoveryManifest",
+          summary: "x402 v2 payment discovery manifest",
+          tags: ["Discovery"],
+          security: [],
+          responses: {
+            "200": jsonResp("x402 resources and accepts[] for paid surfaces.", {
+              type: "object",
+              properties: { x402Version: { type: "integer" }, resources: { type: "array", items: { type: "object" } } },
+              required: ["x402Version", "resources"],
+            }),
+          },
         },
       },
       "/numetal/fees": {
@@ -310,6 +352,93 @@ export function buildOpenApi(env: Env) {
           tags: ["Agent Email"],
           security: [],
           responses: { "200": jsonResp("Agent email service metadata.", { type: "object" }) },
+        },
+      },
+      "/newsletter": {
+        get: {
+          operationId: "newsletterDescriptor",
+          summary: "Newsletter service descriptor (free read)",
+          tags: ["Newsletter"],
+          security: [],
+          responses: { "200": jsonResp("Newsletter subscription service metadata.", { type: "object" }) },
+        },
+      },
+      "/newsletter/subscribe": {
+        post: {
+          operationId: "newsletterSubscribe",
+          summary: "Subscribe email and/or wallet (double opt-in for email)",
+          description: "Free endpoint. Email path sends a confirm link; wallet-only stores the address and expects SIWE completion at /newsletter/xmtp/subscribe.",
+          tags: ["Newsletter"],
+          security: [],
+          requestBody: jsonBody({
+            type: "object",
+            properties: {
+              email: { type: "string", format: "email" },
+              wallet: { type: "string", pattern: "^0x[a-fA-F0-9]{40}$" },
+              site: { type: "string", description: "Origin site label for analytics." },
+              "cf-turnstile-response": { type: "string", description: "Turnstile token when captcha is enabled." },
+            },
+          }),
+          responses: {
+            "200": jsonResp("Subscription accepted or confirm mail sent.", { type: "object", properties: { ok: { type: "boolean" }, status: { type: "string" } }, required: ["ok"] }),
+            "400": { description: "Validation or captcha failure." },
+            "429": { description: "Rate limited." },
+          },
+        },
+      },
+      "/newsletter/confirm": {
+        get: {
+          operationId: "newsletterConfirm",
+          summary: "Confirm an email subscription (HMAC token)",
+          tags: ["Newsletter"],
+          security: [],
+          parameters: [{ name: "t", in: "query", required: true, schema: { type: "string" }, description: "Signed confirmation token from the confirm email." }],
+          responses: {
+            "200": { description: "Subscription confirmed.", content: { "text/plain": { schema: { type: "string" } } } },
+            "400": { description: "Invalid or expired token." },
+          },
+        },
+      },
+      "/newsletter/xmtp/subscribe": {
+        post: {
+          operationId: "newsletterXmtpSubscribe",
+          summary: "Subscribe a wallet for XMTP newsletter delivery",
+          tags: ["Newsletter"],
+          security: [],
+          requestBody: jsonBody({
+            type: "object",
+            properties: {
+              wallet: { type: "string", pattern: "^0x[a-fA-F0-9]{40}$" },
+              signature: { type: "string", description: "EIP-191 signature proving wallet ownership." },
+            },
+            required: ["wallet", "signature"],
+          }),
+          responses: {
+            "200": jsonResp("Wallet subscribed for XMTP.", { type: "object", properties: { ok: { type: "boolean" }, status: { type: "string" } }, required: ["ok"] }),
+            "400": { description: "Bad wallet or signature." },
+            "429": { description: "Rate limited." },
+          },
+        },
+      },
+      "/newsletter/unsubscribe": {
+        get: {
+          operationId: "newsletterUnsubscribeGet",
+          summary: "One-click unsubscribe (HMAC token, browser)",
+          tags: ["Newsletter"],
+          security: [],
+          parameters: [{ name: "t", in: "query", required: true, schema: { type: "string" }, description: "Signed unsubscribe token." }],
+          responses: {
+            "200": { description: "Unsubscribed.", content: { "text/plain": { schema: { type: "string" } } } },
+            "400": { description: "Invalid token." },
+          },
+        },
+        post: {
+          operationId: "newsletterUnsubscribePost",
+          summary: "One-click unsubscribe (RFC 8058, mail client)",
+          tags: ["Newsletter"],
+          security: [],
+          parameters: [{ name: "t", in: "query", required: true, schema: { type: "string" }, description: "Signed unsubscribe token." }],
+          responses: { "200": { description: "Unsubscribed (empty body)." } },
         },
       },
     },
