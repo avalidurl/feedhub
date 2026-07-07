@@ -6,8 +6,16 @@
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
 
-  // Custom domain — api.gokhan.vc (NOT *.workers.dev). Bind via the CF dashboard/route after deploy.
-  "routes": [{ "pattern": "api.gokhan.vc", "custom_domain": true }],
+  // Custom domains — api.gokhan.vc + embeddable public assets (PDFs, etc.).
+  "routes": [
+    { "pattern": "api.gokhan.vc", "custom_domain": true },
+    { "pattern": "assets.numetal.xyz", "custom_domain": true }
+  ],
+
+  // Public studio assets — PDF deck embeds, etc. Keys live under `assets/` prefix.
+  "r2_buckets": [
+    { "binding": "ASSETS", "bucket_name": "numetal-crawls", "preview_bucket_name": "numetal-crawls" }
+  ],
 
   // D1 — system of record. Fill database_id from `wrangler d1 create feedhub`.
   "d1_databases": [

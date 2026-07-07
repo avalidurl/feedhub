@@ -16,10 +16,12 @@ import { handleAgentEmail } from "./agent-email";
 import { agentEmailRecipientMap } from "./agent-email-recipients";
 import { buildOpenApi } from "./discovery/openapi";
 import { AGENT_EMAIL_SKU, skuDescription, x402Requirements } from "./payments/x402";
+import { assetR2Key, serveAsset } from "./assets";
 
 export interface Env extends PaymentEnv {
   DB: D1Database;
   FEED_CACHE: KVNamespace;
+  ASSETS: R2Bucket;
   POLLER: DurableObjectNamespace;
   EMAIL_Q: Queue;
   XMTP_Q: Queue;
@@ -418,11 +420,16 @@ export default {
       await env.POLLER.get(env.POLLER.idFromName("singleton")).fetch("https://poller/run");
       return json({ ok: true, polled: true });
     }
+    if (p === "/admin/dispatch-blast" && req.method === "POST") return adminDispatchBlast(req, env);
     // xmtp-bot integration (admin-gated; the external CF-Container bot calls these over HTTPS)
     if (p === "/admin/xmtp/recipients") return adminXmtpRecipients(req, env);
     if (p === "/admin/xmtp/report" && req.method === "POST") return adminXmtpReport(req, env);
     if (p === "/admin/xmtp/pending") return adminXmtpPending(req, env);
     if (p === "/admin/xmtp/sent") return adminXmtpSent(req, env);
+
+    // ===== public R2 assets (assets.numetal.xyz + /assets/* alias on api.gokhan.vc) =====
+    const assetKey = assetR2Key(url.hostname, rawp);
+    if (assetKey) return serveAsset(req, env, assetKey, co);
 
     return new Response("Not found", { status: 404, headers: co });
   },
@@ -635,7 +642,12 @@ async function emailBroadcast(env: Env, canonicalUrl: string): Promise<void> {
   }
 }
 function renderPostHtml(item: any): string {
-  return `<h1>${escapeHtml(item.title)}</h1>${item.summary ? `<p>${escapeHtml(item.summary)}</p>` : ""}<p><a href="${escapeHtml(item.canonical_url)}">Read the full post →</a></p><hr/><p><a href="{{{RESEND_UNSUBSCRIBE_URL}}}">Unsubscribe</a></p>`;
+  const body = item.content_html
+    ? String(item.content_html)
+    : item.summary
+      ? `<p>${escapeHtml(item.summary)}</p>`
+      : "";
+  return `<h1>${escapeHtml(item.title)}</h1>${body}<p><a href="${escapeHtml(item.canonical_url)}">Read the full post →</a></p><p><a href="https://ishtar.numetal.xyz/deck/not-raising-a-preseed/ishtar-deck-not-a-preseed.pdf">Download the deck (PDF) →</a></p><hr/><p><a href="{{{RESEND_UNSUBSCRIBE_URL}}}">Unsubscribe</a></p>`;
 }
 function escapeHtml(s: string): string {
   return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
@@ -707,6 +719,32 @@ async function adminStatus(req: Request, env: Env): Promise<Response> {
     sends: await q("SELECT COUNT(*) c, SUM(status='sent') sent, SUM(status='failed') failed FROM sends"),
   });
 }
+// One-shot per-post email broadcast (bypasses LAUNCH + queue; idempotent via broadcasts PK).
+async function adminDispatchBlast(req: Request, env: Env): Promise<Response> {
+  if (!bearerOk(req, env)) return new Response("unauthorized", { status: 401 });
+  const b = await req.json().catch(() => ({})) as any;
+  const url = normalizeUrl(String(b.canonical_url || "").trim());
+  const title = String(b.title || "").trim();
+  const summary = String(b.summary || "").trim();
+  const content_html = b.html ? String(b.html) : null;
+  if (!url) return json({ error: "canonical_url required" }, 400);
+  if (!title) return json({ error: "title required" }, 400);
+  const ts = now();
+  await env.DB.prepare(
+    `INSERT INTO items (canonical_url,title,summary,content_html,origin_feed,published,first_seen,notified_at)
+     VALUES (?1,?2,?3,?4,'ishtar',?5,?5,?5)
+     ON CONFLICT(canonical_url) DO UPDATE SET title=?2, summary=?3, content_html=COALESCE(?4,content_html)`
+  ).bind(url, title, summary || null, content_html, ts).run();
+  await emailBroadcast(env, url);
+  const bc = await env.DB.prepare(
+    "SELECT resend_bcast,state FROM broadcasts WHERE canonical_url=?1 AND channel='email'"
+  ).bind(url).first<{ resend_bcast: string; state: string }>();
+  const subs = await env.DB.prepare(
+    "SELECT COUNT(*) c, SUM(email_status='active' AND email IS NOT NULL) active_email FROM subscribers"
+  ).first<{ c: number; active_email: number }>();
+  return json({ ok: true, canonical_url: url, broadcast: bc, subscribers: subs });
+}
+
 async function adminImport(req: Request, env: Env): Promise<Response> {
   if (!bearerOk(req, env)) return new Response("unauthorized", { status: 401 });
   // Body: { subscribers: [{email?, wallet?, source, unsubscribed}] } — already parsed/deduped client-side.
