@@ -1,6 +1,6 @@
 /** Published inboxes for POST /agent/email — keys only in public OpenAPI; full map at GET /agent. */
 export const AGENT_EMAIL_RECIPIENTS = {
-  contact: "contact@numetal.xyz",
+  contact: "contact@gokhan.vc",
   investments: "investments@gokhan.vc",
   gokhanvc: "contact@gokhan.vc",
   numetal: "contact@numetal.xyz",
