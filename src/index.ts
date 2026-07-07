@@ -135,7 +135,7 @@ const CATALOG = {
       ],
     },
     {
-      id: "ishtar", title: "Ishtar — agentic dating (x402 / MPP)", kind: "link", canonical_host: "api.ishtar.numetal.xyz", auth: "x402 | mpp | wallet-sig", status: "live",
+      id: "ishtar", title: "Ishtar — agentic dating (x402 / MPP)", kind: "link", canonical_host: "api.ishtar.numetal.xyz", auth: "x402 (Base + Solana) | mpp | wallet-sig", status: "live",
       base_path: "/ishtar",
       discovery: { skill: "https://api.ishtar.numetal.xyz/skill", well_known: "https://api.ishtar.numetal.xyz/.well-known/x402", mcp: "https://api.ishtar.numetal.xyz/mcp" },
       note: "Payments terminate at the canonical host. The gateway LINKS, never proxies — so the x402/MPP 402 realm and payTo stay intact for CDP Bazaar / x402scan / mppscan settlement.",
