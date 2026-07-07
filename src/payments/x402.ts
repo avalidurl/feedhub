@@ -100,7 +100,7 @@ export function x402BazaarExtension(sku: Sku): { bazaar: unknown } | null {
   };
   const output = {
     type: "json",
-    example: { ok: true, order_id: "agentemail:x402:example", recipient: "contact@numetal.xyz", payer: "0x...", rail: "x402" },
+    example: { ok: true, order_id: "agentemail:x402:example", recipient: "contact@gokhan.vc", payer: "0x...", rail: "x402" },
   };
   return {
     bazaar: {
