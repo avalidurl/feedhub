@@ -73,3 +73,23 @@ CREATE TABLE IF NOT EXISTS broadcasts (
   created_at    INTEGER,
   PRIMARY KEY (canonical_url, channel)
 );
+
+-- agent_emails — paid cold-outreach ledger ($1 USDC per send via x402/MPP).
+CREATE TABLE IF NOT EXISTS agent_emails (
+  order_id       TEXT PRIMARY KEY,
+  payer          TEXT NOT NULL,
+  amount_usdc    TEXT NOT NULL,
+  network        TEXT NOT NULL,
+  nonce          TEXT,
+  settlement_tx  TEXT UNIQUE,
+  subject        TEXT NOT NULL,
+  recipient      TEXT NOT NULL,
+  from_email     TEXT,
+  body_hash      TEXT NOT NULL,
+  resend_id      TEXT,
+  agent_meta     TEXT,
+  status         TEXT NOT NULL DEFAULT 'sent',
+  created_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS agent_emails_payer ON agent_emails (payer, created_at DESC);
+CREATE INDEX IF NOT EXISTS agent_emails_created ON agent_emails (created_at DESC);

@@ -13,6 +13,8 @@ import type { PaymentEnv } from "./payments/env";
 import { fetchLlmsAggregate, llmsCombinedText, SOCIAL_CATALOG } from "./estate";
 import { listBlogSites, readBlogPost } from "./blog";
 import { handleAgentEmail } from "./agent-email";
+import { buildOpenApi } from "./discovery/openapi";
+import { AGENT_EMAIL_SKU, skuDescription, x402Requirements } from "./payments/x402";
 
 export interface Env extends PaymentEnv {
   DB: D1Database;
@@ -32,6 +34,7 @@ export interface Env extends PaymentEnv {
   RESEND_SEGMENT: string;
   RESEND_WEBHOOK_SECRET: string;
   TURNSTILE_SECRET: string;
+  AGENT_EMAIL_SENDER?: string;
 }
 
 const enc = new TextEncoder();
@@ -89,8 +92,12 @@ async function fetchCanonical(link: string): Promise<string> {
 const CATALOG = {
   name: "api.gokhan.vc",
   description: "Aggregate API front door for Gökhan Turhan's web estate — one endpoint, many services.",
-  version: "1",
+  version: "2",
   docs: "https://api.gokhan.vc/",
+  discovery: {
+    openapi: "https://api.gokhan.vc/openapi.json",
+    x402: "https://api.gokhan.vc/.well-known/x402",
+  },
   services: [
     {
       id: "feed", title: "Unified cross-site RSS + JSON feed", kind: "local", auth: "none", status: "live",
@@ -135,6 +142,39 @@ const CATALOG = {
       base_path: "/heartbench",
       link: "https://api.ishtar.numetal.xyz/api/heartbench",
     },
+    {
+      id: "llms", title: "Estate llms.txt aggregate", kind: "local", auth: "none", status: "live",
+      base_path: "/llms",
+      endpoints: [
+        { method: "GET", path: "/llms", desc: "JSON map of llms.txt per estate site (KV-cached 1h)" },
+        { method: "GET", path: "/llms.txt", desc: "Combined plain-text llms index" },
+        { method: "GET", path: "/llms?full=1", desc: "Include llms-full.txt where available (ishtar only)" },
+      ],
+      sources: ["ishtar.numetal.xyz", "numetal.xyz", "gokhan.vc", "gokhanturhan.com"],
+    },
+    {
+      id: "blog", title: "Unified blog reader", kind: "local", auth: "none", status: "live",
+      base_path: "/blog",
+      endpoints: [
+        { method: "GET", path: "/blog/{site}/{slug}", desc: "Post body as JSON (content_text + metadata)" },
+        { method: "GET", path: "/blog?site=&slug=", desc: "Query-string alias" },
+      ],
+      sites: ["ishtar", "numetal", "gokhanvc", "memex"],
+    },
+    {
+      id: "social", title: "Social follow + join links", kind: "local", auth: "none", status: "live",
+      base_path: "/social",
+      endpoints: [{ method: "GET", path: "/social", desc: "Structured follow/join/contact catalog per property" }],
+    },
+    {
+      id: "agent-email", title: "Paid agent cold email", kind: "local", auth: "x402 | mpp", status: "live",
+      base_path: "/agent",
+      endpoints: [
+        { method: "POST", path: "/agent/email", auth: "x402 | mpp", desc: "$1 USDC per email to contact@ or investments@ — bare POST returns 402" },
+      ],
+      payTo: { x402_base: "0x36de990133D36d7E3DF9a820aA3eDE5a2320De71", mpp_tempo: "0x3e267aA9439C82FfB36078676E67901a1ca6D352" },
+      convention: "Subject should include [PAID x402] or [PAID MPP]; payment tx/order id in body helps triage.",
+    },
   ],
 };
 
@@ -149,9 +189,14 @@ function catalogHtml(): string {
   }).join("");
   return `<!doctype html><meta charset="utf-8"><title>api.gokhan.vc</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="alternate" type="application/json" href="/openapi.json" title="OpenAPI 3.1">
 <style>body{font:15px/1.65 ui-monospace,Menlo,monospace;max-width:720px;margin:6vh auto;padding:0 20px;color:#141414;background:#f7f7f5}h1{font-size:22px;margin-bottom:2px}h2{font-size:15px;margin:26px 0 6px;border-top:1px solid #ddd;padding-top:18px}code{background:#e7e7e7;padding:1px 5px;font-size:13px}a{color:#e10600}.m{color:#6a6a6a}em{color:#8a5a00;font-style:normal}ul{padding-left:18px}.tag{font-size:10px;background:#141414;color:#f7f7f5;padding:1px 6px;vertical-align:middle;text-transform:uppercase;letter-spacing:.05em}</style>
 <h1>api.gokhan.vc</h1>
 <p class="m">${escapeHtml(CATALOG.description)} <br>Machine catalog: <a href="/_meta">/_meta</a> · Health: <a href="/health">/health</a></p>
+<section><h2>Discovery <span class="tag">agents</span></h2><ul>
+<li><code>GET /openapi.json</code> <span class="m">— OpenAPI 3.1 (x402scan / MPPscan read this)</span></li>
+<li><code>GET /.well-known/x402</code> <span class="m">— x402 payment discovery</span></li>
+</ul></section>
 ${svc}`;
 }
 
@@ -244,11 +289,33 @@ export default {
     // Trailing-slash-insensitive (except root). Everything routes off `rawp`.
     const rawp = url.pathname.replace(/\/+$/, "") || "/";
     const co = cors(env, req);
-    if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: { ...co, "Access-Control-Allow-Methods": "GET,POST,OPTIONS", "Access-Control-Allow-Headers": "content-type,authorization" } });
+    if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: { ...co, "Access-Control-Allow-Methods": "GET,POST,OPTIONS", "Access-Control-Allow-Headers": "content-type,authorization,payment-signature,x-payment" } });
 
     // ===== gateway meta =====
     if (rawp === "/health") return json({ ok: true, service: "api.gokhan.vc" }, 200, co);
     if (rawp === "/_meta") return json(CATALOG, 200, co);
+    if (rawp === "/openapi.json") return json(buildOpenApi(env), 200, co);
+    if (rawp === "/.well-known/x402") {
+      const base = (env.PUBLIC_API_URL || "https://api.gokhan.vc").replace(/\/+$/, "");
+      const sku = AGENT_EMAIL_SKU;
+      const resources = env.PAY_TO
+        ? [{
+            resource: `${base}${sku.route}`,
+            type: "http",
+            x402Version: 2,
+            description: skuDescription(sku),
+            mimeType: "application/json",
+            accepts: [x402Requirements(env, sku, env.PAY_TO)],
+          }]
+        : [];
+      return json({ x402Version: 2, resources }, 200, co);
+    }
+    if (rawp === "/favicon.ico") {
+      return new Response(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" fill="#161616"/><text x="16" y="22" text-anchor="middle" font-family="ui-monospace,monospace" font-size="14" fill="#e10600">G</text></svg>',
+        { status: 200, headers: { "content-type": "image/svg+xml", "cache-control": "public, max-age=86400", ...co } },
+      );
+    }
     if (rawp === "/" || rawp === "/index.html") {
       if ((req.headers.get("Accept") || "").includes("text/html"))
         return new Response(catalogHtml(), { status: 200, headers: { "content-type": "text/html; charset=utf-8", ...co } });
@@ -268,6 +335,53 @@ export default {
     // ===== ishtar / heartbench — LINK, never proxy (keeps x402/MPP settlement realm intact) =====
     if (rawp === "/ishtar") return Response.redirect("https://api.ishtar.numetal.xyz/", 302);
     if (rawp === "/heartbench") return Response.redirect("https://api.ishtar.numetal.xyz/api/heartbench", 302);
+
+    // ===== llms aggregate =====
+    if (rawp === "/llms" || rawp === "/estate/llms") {
+      const full = url.searchParams.get("full") === "1";
+      const cacheKey = full ? "llms:full:v1" : "llms:index:v1";
+      let payload = await env.FEED_CACHE.get(cacheKey);
+      if (!payload) {
+        const agg = await fetchLlmsAggregate(full);
+        payload = JSON.stringify(agg);
+        await env.FEED_CACHE.put(cacheKey, payload, { expirationTtl: 3600 });
+      }
+      return new Response(payload, { headers: { "content-type": "application/json; charset=utf-8", "cache-control": "public, max-age=3600", ...co } });
+    }
+    if (rawp === "/llms.txt") {
+      let text = await env.FEED_CACHE.get("llms:combined:v1");
+      if (!text) {
+        const agg = await fetchLlmsAggregate(false);
+        text = llmsCombinedText(agg.sites);
+        await env.FEED_CACHE.put("llms:combined:v1", text, { expirationTtl: 3600 });
+      }
+      return new Response(text, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=3600", ...co } });
+    }
+
+    // ===== unified blog reader =====
+    if (rawp === "/blog" && req.method === "GET") {
+      const site = url.searchParams.get("site") || "";
+      const slug = url.searchParams.get("slug") || "";
+      if (!site || !slug) return json({ sites: listBlogSites(), usage: "GET /blog/{site}/{slug} or ?site=&slug=" }, 200, co);
+      const feedCache = await env.FEED_CACHE.get("rendered:feed.json");
+      const post = await readBlogPost(site, slug, feedCache);
+      if ("error" in post) return json({ error: post.error }, post.status, co);
+      return json(post, 200, co);
+    }
+    const blogMatch = rawp.match(/^\/blog\/([^/]+)\/([^/]+)$/);
+    if (blogMatch && req.method === "GET") {
+      const feedCache = await env.FEED_CACHE.get("rendered:feed.json");
+      const post = await readBlogPost(decodeURIComponent(blogMatch[1]), decodeURIComponent(blogMatch[2]), feedCache);
+      if ("error" in post) return json({ error: post.error }, post.status, co);
+      return json(post, 200, co);
+    }
+
+    // ===== social catalog =====
+    if (rawp === "/social") return json(SOCIAL_CATALOG, 200, { ...co, "cache-control": "public, max-age=86400" });
+
+    // ===== paid agent email =====
+    if (rawp === "/agent/email" || rawp === "/email/send") return handleAgentEmail(req, env, co);
+    if (rawp === "/agent") return json(CATALOG.services.find((s) => s.id === "agent-email"), 200, co);
 
     // ===== newsletter service descriptor =====
     if (rawp === "/newsletter") return json(CATALOG.services.find((s) => s.id === "newsletter"), 200, co);
@@ -413,7 +527,7 @@ async function xmtpSubscribe(req: Request, env: Env, co: Record<string, string>)
   // Prove wallet ownership (EIP-191) — without this, anyone could enroll third-party wallets and
   // flood the table. Only the wallet holder can produce this signature; replay just re-subscribes
   // the same wallet (idempotent), so a static message is sufficient.
-  if (!/^0x[0-9a-fA-F]{130}$/.test(signature)) return json({ error: "signature required" }, 400, co);
+  if (!/^0x[0-9a-fA-F]{128,}$/.test(signature)) return json({ error: "signature required" }, 400, co);
   let recovered = "";
   try { recovered = (await recoverMessageAddress({ message: xmtpSubMessage(wallet), signature: signature as `0x${string}` })).toLowerCase(); }
   catch { return json({ error: "bad signature" }, 400, co); }

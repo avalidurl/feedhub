@@ -9,7 +9,8 @@
     "deploy": "wrangler deploy",
     "d1:schema": "wrangler d1 execute feedhub --remote --file schema.sql",
     "d1:schema:local": "wrangler d1 execute feedhub --local --file schema.sql",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260601.0",
