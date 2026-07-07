@@ -82,5 +82,5 @@ test("ownership proofs only when AGENTCASH_OWNERSHIP_PROOF is set", () => {
 test("openapi has guidance and contact email", () => {
   const doc = buildOpenApi(env) as { info: { "x-guidance"?: string; contact?: { email?: string } } };
   assert.ok(doc.info["x-guidance"]?.includes("/agent/email"));
-  assert.equal(doc.info.contact?.email, "contact@gokhanturhan.com");
+  assert.equal(doc.info.contact?.email, "contact@gokhan.vc");
 });

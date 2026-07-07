@@ -3,6 +3,7 @@
  * Adapted from numetal-datebook — same payTo / facilitator stack as Ishtar.
  */
 import type { Env } from "./env";
+import { AGENT_EMAIL_RECIPIENT_KEYS } from "../agent-email-recipients.ts";
 
 export interface Sku {
   id: string;
@@ -99,7 +100,7 @@ export function x402BazaarExtension(sku: Sku): { bazaar: unknown } | null {
   };
   const output = {
     type: "json",
-    example: { ok: true, order_id: "agentemail:x402:example", recipient: "contact@gokhanturhan.com", payer: "0x...", rail: "x402" },
+    example: { ok: true, order_id: "agentemail:x402:example", recipient: "contact@numetal.xyz", payer: "0x...", rail: "x402" },
   };
   return {
     bazaar: {
@@ -120,7 +121,7 @@ export function x402BazaarExtension(sku: Sku): { bazaar: unknown } | null {
                 properties: {
                   subject: { type: "string", maxLength: 200 },
                   body: { type: "string", maxLength: 8000 },
-                  recipient: { type: "string", enum: ["contact", "investments"] },
+                  recipient: { type: "string", enum: [...AGENT_EMAIL_RECIPIENT_KEYS] },
                 },
                 required: ["subject", "body"],
               },

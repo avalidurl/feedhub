@@ -3,6 +3,7 @@
  * @agentcash/discovery validators. Served at GET /openapi.json.
  */
 import type { Env } from "../payments/env.ts";
+import { AGENT_EMAIL_RECIPIENT_KEYS } from "../agent-email-recipients.ts";
 import { AGENT_EMAIL_SKU, type Sku } from "../payments/x402.ts";
 import { mppCurrency, mppEnabled, mppRecipient, MPP_NETWORK } from "../payments/mpp.ts";
 
@@ -50,7 +51,11 @@ export function buildOpenApi(env: Env) {
       subject: { type: "string", minLength: 1, maxLength: 200, description: "Email subject line (max 200 chars)." },
       body: { type: "string", minLength: 1, maxLength: 8000, description: "Plain-text message body (max 8000 chars)." },
       from_email: { type: "string", format: "email", description: "Optional reply-to address for the founder." },
-      recipient: { type: "string", enum: ["contact", "investments"], description: "Inbox: contact@gokhanturhan.com or investments@gokhan.vc." },
+      recipient: {
+        type: "string",
+        enum: [...AGENT_EMAIL_RECIPIENT_KEYS],
+        description: "Inbox key (default contact). Full key→address map: GET /agent. A bare POST returns 402 before body validation — safe to probe payment rails.",
+      },
       agent: {
         type: "object",
         description: "Optional agent metadata for triage.",
@@ -117,8 +122,8 @@ export function buildOpenApi(env: Env) {
       description:
         "Aggregate API front door for Gökhan Turhan's web estate — unified feeds, blog reader, llms.txt index, $NUMETAL status, and paid agent cold email.",
       "x-guidance":
-        "Start at GET / or GET /_meta for the full service catalog. Read unified RSS/JSON feeds at GET /feed.xml or GET /feed.json (aliases: /feed/rss.xml, /feed/feed.json). Fetch blog posts as JSON with GET /blog/{site}/{slug} (sites: ishtar, numetal, gokhanvc, memex). Aggregate llms.txt files at GET /llms or GET /llms.txt. Social/contact links at GET /social. Live $NUMETAL metrics at GET /numetal/fees, /numetal/burns, /numetal/status. Newsletter subscribe at POST /newsletter/subscribe (free). To reach the founder by email, POST /agent/email with JSON {subject, body} — $1.00 USDC per message via x402 on Base or MPP on Tempo; a bare POST returns 402 with both payment challenges. Use recipient=contact (default) or investments. Ishtar dating API payments terminate at api.ishtar.numetal.xyz (this gateway links, never proxies paid surfaces).",
-      contact: { email: "contact@gokhanturhan.com", url: "https://gokhan.vc" },
+        "Start at GET / or GET /_meta for the full service catalog. Read unified RSS/JSON feeds at GET /feed.xml or GET /feed.json (aliases: /feed/rss.xml, /feed/feed.json). Fetch blog posts as JSON with GET /blog/{site}/{slug} (sites: ishtar, numetal, gokhanvc, memex). Aggregate llms.txt files at GET /llms or GET /llms.txt. Social/contact links at GET /social. Live $NUMETAL metrics at GET /numetal/fees, /numetal/burns, /numetal/status. Newsletter subscribe at POST /newsletter/subscribe (free). To reach the founder by email, POST /agent/email with JSON {subject, body} — $1.00 USDC per message via x402 on Base or MPP on Tempo; a bare POST returns 402 with both payment challenges (no email sent). Recipient keys and inbox map: GET /agent. Ishtar dating API payments terminate at api.ishtar.numetal.xyz (this gateway links, never proxies paid surfaces).",
+      contact: { email: "contact@gokhan.vc", url: "https://gokhan.vc" },
     },
     ...ownershipDiscovery(env),
     servers: [{ url: base }],
@@ -128,7 +133,7 @@ export function buildOpenApi(env: Env) {
           operationId: "sendPaidAgentEmail",
           summary: "Paid agent cold email — $1.00 USDC per message to the founder",
           description:
-            "Delivers one email to contact@gokhanturhan.com or investments@gokhan.vc after payment settles. A bare POST (no payment header) returns 402 with x402 (PAYMENT-REQUIRED) and, when enabled, MPP (WWW-Authenticate) challenges — payment is checked before body validation. Subject is prefixed [PAID x402] or [PAID MPP].",
+            "Delivers one paid email to a published founder inbox after payment settles. Recipient is an inbox key (default contact) — see GET /agent for the key→address map. A bare POST (no payment header) returns 402 with x402 (PAYMENT-REQUIRED) and, when enabled, MPP (WWW-Authenticate) challenges — payment is checked before body validation and no email is sent. Subject is prefixed [PAID x402] or [PAID MPP].",
           tags: ["Agent Email"],
           "x-payment-info": {
             price: { mode: "fixed", currency: "USD", amount: usd(email) },

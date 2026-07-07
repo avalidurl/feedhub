@@ -135,7 +135,7 @@ export const SOCIAL_CATALOG = {
         { platform: "Telegram", handle: "Research Log", href: "https://t.me/gokhanturhans" },
       ],
       join: [{ platform: "Discord", href: "https://discord.gg/ZcxcwRPT7R", note: "Market Research Unit" }],
-      contact: [{ type: "email", href: "mailto:contact@gokhanturhan.com", address: "contact@gokhanturhan.com" }],
+      contact: [],
     },
   ],
 } as const;

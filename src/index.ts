@@ -13,6 +13,7 @@ import type { PaymentEnv } from "./payments/env";
 import { fetchLlmsAggregate, llmsCombinedText, SOCIAL_CATALOG } from "./estate";
 import { listBlogSites, readBlogPost } from "./blog";
 import { handleAgentEmail } from "./agent-email";
+import { agentEmailRecipientMap } from "./agent-email-recipients";
 import { buildOpenApi } from "./discovery/openapi";
 import { AGENT_EMAIL_SKU, skuDescription, x402Requirements } from "./payments/x402";
 
@@ -170,7 +171,8 @@ const CATALOG = {
       id: "agent-email", title: "Paid agent cold email", kind: "local", auth: "x402 | mpp", status: "live",
       base_path: "/agent",
       endpoints: [
-        { method: "POST", path: "/agent/email", auth: "x402 | mpp", desc: "$1 USDC per email to contact@ or investments@ — bare POST returns 402" },
+        { method: "POST", path: "/agent/email", auth: "x402 | mpp", desc: "$1 USDC per email — bare POST returns 402 (no send); recipient keys at GET /agent" },
+        { method: "GET", path: "/agent", auth: "none", desc: "Service descriptor + recipient key→inbox map + 402 probe hint" },
       ],
       payTo: { x402_base: "0x36de990133D36d7E3DF9a820aA3eDE5a2320De71", mpp_tempo: "0x3e267aA9439C82FfB36078676E67901a1ca6D352" },
       convention: "Subject should include [PAID x402] or [PAID MPP]; payment tx/order id in body helps triage.",
@@ -381,7 +383,20 @@ export default {
 
     // ===== paid agent email =====
     if (rawp === "/agent/email" || rawp === "/email/send") return handleAgentEmail(req, env, co);
-    if (rawp === "/agent") return json(CATALOG.services.find((s) => s.id === "agent-email"), 200, co);
+    if (rawp === "/agent") {
+      const svc = CATALOG.services.find((s) => s.id === "agent-email");
+      return json({
+        ...svc,
+        price_usd: "1.00",
+        recipients: agentEmailRecipientMap(),
+        probe_402: {
+          safe: true,
+          note: "Bare POST returns 402 before body validation — no email is sent.",
+          curl: 'curl -v -X POST https://api.gokhan.vc/agent/email -H "Content-Type: application/json" -d \'{"subject":"probe","body":"402 test"}\'',
+          expect_headers: ["payment-required", "www-authenticate", "x-order-id"],
+        },
+      }, 200, co);
+    }
 
     // ===== newsletter service descriptor =====
     if (rawp === "/newsletter") return json(CATALOG.services.find((s) => s.id === "newsletter"), 200, co);

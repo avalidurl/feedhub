@@ -2,6 +2,7 @@
  * Paid agent cold email — $1 USDC via x402 (Base) or MPP (Tempo).
  * POST /agent/email → 402 without payment → verify → Resend to founder inbox.
  */
+import { AGENT_EMAIL_RECIPIENT_KEYS, resolveAgentEmailRecipient } from "./agent-email-recipients";
 import type { PaymentEnv } from "./payments/env";
 import { AGENT_EMAIL_SKU, encodeX402Header, parsePaymentHeader, verifyX402Payment, x402Challenge } from "./payments/x402";
 import { buildMppChallengeHeader, mppEnabled, mppReceiptHeader, parseMppAuth, verifyMppPayment, MPP_NETWORK } from "./payments/mpp";
@@ -12,11 +13,6 @@ type AgentEmailEnv = PaymentEnv & {
   RESEND_API_KEY: string;
   SENDER: string;
   AGENT_EMAIL_SENDER?: string;
-};
-
-const RECIPIENTS: Record<string, string> = {
-  contact: "contact@gokhanturhan.com",
-  investments: "investments@gokhan.vc",
 };
 
 const MAX_SUBJECT = 200;
@@ -62,8 +58,8 @@ export async function handleAgentEmail(req: Request, env: AgentEmailEnv, co: Rec
   const body = (parsed.body || "").trim();
   const fromEmail = (parsed.from_email || "").trim().toLowerCase();
   const recipientKey = (parsed.recipient || "contact").trim().toLowerCase();
-  const to = RECIPIENTS[recipientKey];
-  if (!to) return json({ error: "bad_recipient", allowed: Object.keys(RECIPIENTS) }, 400, co);
+  const to = resolveAgentEmailRecipient(recipientKey);
+  if (!to) return json({ error: "bad_recipient", allowed: AGENT_EMAIL_RECIPIENT_KEYS }, 400, co);
   if (!subject || subject.length > MAX_SUBJECT) return json({ error: "bad_subject", max: MAX_SUBJECT }, 400, co);
   if (!body || body.length > MAX_BODY) return json({ error: "bad_body", max: MAX_BODY }, 400, co);
   if (fromEmail && (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(fromEmail) || fromEmail.length > MAX_FROM)) {
