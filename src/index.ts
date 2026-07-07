@@ -172,11 +172,14 @@ const CATALOG = {
     {
       id: "agent-email", title: "Paid agent cold email", kind: "local", auth: "x402 | mpp", status: "live",
       base_path: "/agent",
+      sku: "agent_email",
+      price_usd: "1.00",
       endpoints: [
-        { method: "POST", path: "/agent/email", auth: "x402 | mpp", desc: "$1 USDC per email — bare POST returns 402 (no send); recipient keys at GET /agent" },
+        { method: "POST", path: "/agent/email", auth: "x402 | mpp", desc: "$1.00 USDC per email — bare POST returns 402 (no send); recipient keys at GET /agent" },
         { method: "GET", path: "/agent", auth: "none", desc: "Service descriptor + recipient key→inbox map + 402 probe hint" },
       ],
       payTo: { x402_base: "0x36de990133D36d7E3DF9a820aA3eDE5a2320De71", mpp_tempo: "0x3e267aA9439C82FfB36078676E67901a1ca6D352" },
+      discovery: { openapi: "https://api.gokhan.vc/openapi.json", x402: "https://api.gokhan.vc/.well-known/x402" },
       convention: "Subject should include [PAID x402] or [PAID MPP]; payment tx/order id in body helps triage.",
     },
   ],
@@ -201,6 +204,14 @@ function catalogHtml(): string {
 <li><code>GET /openapi.json</code> <span class="m">— OpenAPI 3.1 (x402scan / MPPscan read this)</span></li>
 <li><code>GET /.well-known/x402</code> <span class="m">— x402 payment discovery</span></li>
 </ul></section>
+<section><h2>Paid surfaces <span class="tag">agents</span></h2>
+<table style="width:100%;border-collapse:collapse;font-size:13px;margin:8px 0 0">
+<thead><tr style="border-bottom:1px solid #ddd;text-align:left"><th>SKU</th><th>Price</th><th>Path</th><th>Rails</th></tr></thead>
+<tbody>
+<tr><td><code>agent_email</code></td><td>$1.00 USDC</td><td><code>POST /agent/email</code></td><td>x402 (Base) · MPP (Tempo)</td></tr>
+</tbody></table>
+<p class="m">Ishtar dating payments: <a href="https://api.ishtar.numetal.xyz/openapi.json">api.ishtar.numetal.xyz/openapi.json</a> — this gateway links, never proxies.</p>
+</section>
 ${svc}`;
 }
 
