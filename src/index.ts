@@ -661,7 +661,15 @@ function renderPostHtml(item: any): string {
     : item.summary
       ? `<p>${escapeHtml(item.summary)}</p>`
       : "";
-  return `<h1>${escapeHtml(item.title)}</h1>${body}<p><a href="${escapeHtml(item.canonical_url)}">Read the full post →</a></p><p><a href="https://ishtar.numetal.xyz/deck/not-raising-a-preseed/ishtar-deck-not-a-preseed.pdf">Download the deck (PDF) →</a></p><hr/><p><a href="{{{RESEND_UNSUBSCRIBE_URL}}}">Unsubscribe</a></p>`;
+  const deck =
+    item.origin_feed === "ishtar"
+      ? `<p><a href="https://ishtar.numetal.xyz/deck/not-raising-a-preseed/ishtar-deck-not-a-preseed.pdf">Download the deck (PDF) →</a></p>`
+      : "";
+  const firstPub =
+    item.origin_feed === "curb"
+      ? `<p style="color:#666;font-size:14px">First published on <a href="${escapeHtml(item.canonical_url)}">CURB</a>.</p>`
+      : "";
+  return `<h1>${escapeHtml(item.title)}</h1>${body}<p><a href="${escapeHtml(item.canonical_url)}">Read the full post →</a></p>${deck}${firstPub}<hr/><p><a href="{{{RESEND_UNSUBSCRIBE_URL}}}">Unsubscribe</a></p>`;
 }
 function escapeHtml(s: string): string {
   return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
@@ -741,14 +749,27 @@ async function adminDispatchBlast(req: Request, env: Env): Promise<Response> {
   const title = String(b.title || "").trim();
   const summary = String(b.summary || "").trim();
   const content_html = b.html ? String(b.html) : null;
+  const originFeedRaw = String(b.origin_feed || "").trim().toLowerCase();
+  const originFeed =
+    originFeedRaw && BRAND_SENDER[originFeedRaw]
+      ? originFeedRaw
+      : url.includes("curb.numetal")
+        ? "curb"
+        : url.includes("ishtar")
+          ? "ishtar"
+          : url.includes("numetal.xyz")
+            ? "numetal"
+            : url.includes("gokhan.vc")
+              ? "atelier"
+              : "personal";
   if (!url) return json({ error: "canonical_url required" }, 400);
   if (!title) return json({ error: "title required" }, 400);
   const ts = now();
   await env.DB.prepare(
     `INSERT INTO items (canonical_url,title,summary,content_html,origin_feed,published,first_seen,notified_at)
-     VALUES (?1,?2,?3,?4,'ishtar',?5,?5,?5)
-     ON CONFLICT(canonical_url) DO UPDATE SET title=?2, summary=?3, content_html=COALESCE(?4,content_html)`
-  ).bind(url, title, summary || null, content_html, ts).run();
+     VALUES (?1,?2,?3,?4,?5,?6,?6,?6)
+     ON CONFLICT(canonical_url) DO UPDATE SET title=?2, summary=?3, content_html=COALESCE(?4,content_html), origin_feed=?5`
+  ).bind(url, title, summary || null, content_html, originFeed, ts).run();
   await emailBroadcast(env, url);
   const bc = await env.DB.prepare(
     "SELECT resend_bcast,state FROM broadcasts WHERE canonical_url=?1 AND channel='email'"
@@ -756,7 +777,7 @@ async function adminDispatchBlast(req: Request, env: Env): Promise<Response> {
   const subs = await env.DB.prepare(
     "SELECT COUNT(*) c, SUM(email_status='active' AND email IS NOT NULL) active_email FROM subscribers"
   ).first<{ c: number; active_email: number }>();
-  return json({ ok: true, canonical_url: url, broadcast: bc, subscribers: subs });
+  return json({ ok: true, canonical_url: url, origin_feed: originFeed, broadcast: bc, subscribers: subs });
 }
 
 async function adminImport(req: Request, env: Env): Promise<Response> {

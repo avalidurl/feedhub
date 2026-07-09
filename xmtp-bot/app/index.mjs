@@ -114,6 +114,58 @@ async function launchBlast() {
   return { total: recips.length, already_delivered: already, sent_now: by("sent"), skipped: by("skipped"), failed: by("failed") };
 }
 
+function dispatchMessage(unsubUrl, body) {
+  const url = String(body.url || body.canonical_url || "").trim();
+  const title = String(body.title || "New dispatch").trim();
+  const excerpt = String(body.excerpt || body.summary || "").trim();
+  const quote = body.quote ? String(body.quote) : "";
+  const deck = body.deck ? String(body.deck) : "";
+  const firstPub =
+    url.includes("curb.numetal")
+      ? "First published on CURB."
+      : "";
+  const lines = [
+    `New dispatch — ${title}`,
+    "",
+    ...(quote ? [quote, ""] : []),
+    ...(excerpt ? [excerpt, ""] : []),
+    ...(url ? [`→ ${url}`, ""] : []),
+    ...(deck ? [`Deck (PDF): ${deck}`, ""] : []),
+    ...(firstPub ? [firstPub, ""] : []),
+    "— Gökhan",
+    "",
+    `Unsubscribe: ${unsubUrl}`,
+  ];
+  return lines.join("\n");
+}
+
+async function fanout(body = {}) {
+  const key = String(body.canonical_url || body.url || "").trim();
+  if (!key) throw new Error("canonical_url required");
+  const c = await ensureClient();
+  const recips = await resolvedRecipients();
+  const alreadySent = await fetchSent(key);
+  const valid = recips.filter((r) => r.address);
+  const map = await reachable(c, valid.map((r) => r.address));
+  const results = [];
+  let already = 0;
+  for (const r of recips) {
+    if (alreadySent.has(r.subscriber_id)) { already++; continue; }
+    if (!r.address || map.get(r.address) !== true) { results.push({ subscriber_id: r.subscriber_id, status: "skipped" }); continue; }
+    try {
+      const id = await sendDm(c, r.address, dispatchMessage(r.unsub_url, body));
+      results.push({ subscriber_id: r.subscriber_id, status: "sent", provider_id: id });
+    } catch (e) {
+      results.push({ subscriber_id: r.subscriber_id, status: "failed" });
+      console.error("fanout send failed", r.address, String(e?.message ?? e));
+    }
+    await sleep(120);
+  }
+  await reportSends(key, results);
+  const by = (s) => results.filter((x) => x.status === s).length;
+  return { key, total: recips.length, already_delivered: already, sent_now: by("sent"), skipped: by("skipped"), failed: by("failed") };
+}
+
 const send = (res, code, obj) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); };
 
 createServer(async (req, res) => {
@@ -121,6 +173,12 @@ createServer(async (req, res) => {
     if (req.url === "/health") return send(res, 200, { ok: true, inboxId: client?.inboxId ?? null, env: XMTP_ENV });
     if (req.method === "POST" && req.url === "/canmessage-dryrun") return send(res, 200, await canMessageDryRun());
     if (req.method === "POST" && req.url === "/launch-blast") return send(res, 200, await launchBlast());
+    if (req.method === "POST" && req.url === "/fanout") {
+      const chunks = [];
+      for await (const ch of req) chunks.push(ch);
+      const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString() || "{}") : {};
+      return send(res, 200, await fanout(body));
+    }
     return send(res, 404, { error: "not found" });
   } catch (e) {
     send(res, 500, { error: String(e?.message ?? e) });
