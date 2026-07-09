@@ -620,11 +620,14 @@ async function resendUpsertContact(env: Env, email: string, unsubscribed: boolea
 const BRAND_SENDER: Record<string, string> = {
   ishtar: "Ishtar by Gökhan Turhan",
   numetal: "Numetal Dispatch by Gökhan Turhan",
+  curb: "CURB by Gökhan Turhan",
   atelier: "Brief by Atelier Gökhan Turhan VC",
   personal: "Journal by Gökhan Turhan",
 };
 function senderFor(originFeed: string, env: Env): string {
   const name = BRAND_SENDER[originFeed] || "Gökhan Turhan";
+  // CURB product FROM on verified numetal.xyz (Resend DKIM). Public contact stays contact@numetal.xyz.
+  if (originFeed === "curb") return `${name} <curb@numetal.xyz>`;
   const m = env.SENDER.match(/<([^>]+)>/);
   return `${name} <${m ? m[1] : "newsletter@gokhan.vc"}>`;
 }
@@ -890,7 +893,15 @@ export class Poller {
       .bind(feedUrl, res.headers.get("ETag"), res.headers.get("Last-Modified"), now()).run();
     if (res.status === 304) return;
     const xml = await res.text();
-    const feedKey = feedUrl.includes("ishtar") ? "ishtar" : feedUrl.includes("numetal") ? "numetal" : feedUrl.includes("gokhan.vc") ? "atelier" : "personal";
+    const feedKey = feedUrl.includes("ishtar")
+      ? "ishtar"
+      : feedUrl.includes("curb.numetal")
+        ? "curb"
+        : feedUrl.includes("numetal")
+          ? "numetal"
+          : feedUrl.includes("gokhan.vc")
+            ? "atelier"
+            : "personal";
     for (const it of parseFeed(xml)) {
       const canonical = await fetchCanonical(it.link); // resolve rel=canonical → cross-feed dedup
       // canonical_url PK: a syndicated copy that resolves to the same canonical collides → no dupe.

@@ -12,6 +12,7 @@ export interface EstateSite {
 export const ESTATE_SITES: readonly EstateSite[] = [
   { id: "ishtar", host: "ishtar.numetal.xyz", llms: "https://ishtar.numetal.xyz/llms.txt", llmsFull: "https://ishtar.numetal.xyz/llms-full.txt", blogBase: "https://ishtar.numetal.xyz/blog", blogPattern: "/blog/{slug}/" },
   { id: "numetal", host: "numetal.xyz", llms: "https://numetal.xyz/llms.txt", blogBase: "https://numetal.xyz/blog", blogPattern: "/blog/{slug}" },
+  { id: "curb", host: "curb.numetal.xyz", llms: "https://curb.numetal.xyz/llms.txt", blogBase: "https://curb.numetal.xyz/blog", blogPattern: "/blog/{slug}" },
   { id: "gokhanvc", host: "gokhan.vc", llms: "https://gokhan.vc/llms.txt", blogBase: "https://gokhan.vc/blog", blogPattern: "/blog/{slug}" },
   { id: "memex", host: "gokhanturhan.com", llms: "https://gokhanturhan.com/llms.txt", blogBase: "https://gokhanturhan.com/journal", blogPattern: "/journal/{slug}/" },
 ] as const;
@@ -21,6 +22,9 @@ const SITE_ALIASES: Record<string, string> = {
   "ishtar.numetal.xyz": "ishtar",
   numetal: "numetal",
   "numetal.xyz": "numetal",
+  curb: "curb",
+  "curb.numetal.xyz": "curb",
+  "inference-swap": "curb",
   atelier: "gokhanvc",
   "gokhan.vc": "gokhanvc",
   gokhanvc: "gokhanvc",
@@ -107,6 +111,17 @@ export const SOCIAL_CATALOG = {
         { platform: "Discord", handle: "Numetal", href: "https://discord.gg/MC4DYumPMz" },
       ],
       join: [{ platform: "Discord", href: "https://discord.gg/MC4DYumPMz", note: "builder chat" }],
+      contact: [{ type: "email", href: "mailto:contact@numetal.xyz", address: "contact@numetal.xyz" }],
+    },
+    {
+      id: "curb",
+      label: "CURB",
+      domain: "curb.numetal.xyz",
+      url: "https://curb.numetal.xyz",
+      follow: [
+        { platform: "X", handle: "@numetalxyz", href: "https://x.com/numetalxyz" },
+      ],
+      join: [],
       contact: [{ type: "email", href: "mailto:contact@numetal.xyz", address: "contact@numetal.xyz" }],
     },
     {
