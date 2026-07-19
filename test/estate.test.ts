@@ -19,10 +19,14 @@ test("llmsCombinedText includes host sections", () => {
   assert.match(text, /unavailable/);
 });
 
-test("social catalog has four properties", () => {
-  assert.equal(SOCIAL_CATALOG.properties.length, 4);
+test("social catalog covers every estate property", () => {
+  assert.equal(SOCIAL_CATALOG.properties.length, 5);
   const memex = SOCIAL_CATALOG.properties.find((p) => p.id === "memex");
   assert.ok(memex?.follow.some((f) => f.href.includes("x.com/goekhan")));
+  // Studio property carries the current brand and X handle.
+  const gokhanvc = SOCIAL_CATALOG.properties.find((p) => p.id === "gokhanvc");
+  assert.equal(gokhanvc?.label, "Gökhan Ventures");
+  assert.ok(gokhanvc?.follow.some((f) => f.href === "https://x.com/goekhanvc"));
 });
 
 test("parsePaymentHeader reads authorization fields", () => {

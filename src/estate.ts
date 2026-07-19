@@ -126,10 +126,10 @@ export const SOCIAL_CATALOG = {
     },
     {
       id: "gokhanvc",
-      label: "Gökhan VC",
+      label: "Gökhan Ventures",
       domain: "gokhan.vc",
       url: "https://gokhan.vc",
-      follow: [{ platform: "X", handle: "@ateliergokhan", href: "https://x.com/ateliergokhan" }],
+      follow: [{ platform: "X", handle: "@goekhanvc", href: "https://x.com/goekhanvc" }],
       join: [],
       contact: [
         { type: "email", href: "mailto:contact@gokhan.vc", address: "contact@gokhan.vc" },

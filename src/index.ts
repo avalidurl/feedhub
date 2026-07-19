@@ -614,14 +614,14 @@ async function resendUpsertContact(env: Env, email: string, unsubscribed: boolea
     body: JSON.stringify({ email, unsubscribed }),
   });
 }
-// Per-brand newsletter sender display names — always "… by Gökhan Turhan". Same verified
+// Per-brand newsletter sender display names — "<product> by <the name behind it>". Same verified
 // address (newsletter@gokhan.vc) so SPF/DKIM/DMARC alignment is unchanged; only the display name
 // varies by the post's origin feed.
 const BRAND_SENDER: Record<string, string> = {
   ishtar: "Ishtar by Gökhan Turhan",
   numetal: "Numetal Dispatch by Gökhan Turhan",
   curb: "CURB by Gökhan Turhan",
-  atelier: "Brief by Atelier Gökhan Turhan VC",
+  atelier: "Brief by Gökhan Ventures",
   personal: "Journal by Gökhan Turhan",
 };
 function senderFor(originFeed: string, env: Env): string {
