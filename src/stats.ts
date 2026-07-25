@@ -127,7 +127,10 @@ export function extractSample(src: StatsSource, payload: Record<string, unknown>
 }
 
 export function parseWindow(raw: string | null): { key: string; sec: number } {
-  const key = raw && raw in WINDOWS ? raw : DEFAULT_WINDOW;
+  const key =
+    raw && Object.prototype.hasOwnProperty.call(WINDOWS, raw)
+      ? raw
+      : DEFAULT_WINDOW;
   return { key, sec: WINDOWS[key] };
 }
 
