@@ -18,6 +18,7 @@ import { buildOpenApi } from "./discovery/openapi";
 import { AGENT_EMAIL_SKU, skuDescription, x402Requirements } from "./payments/x402";
 import { assetR2Key, serveAsset } from "./assets";
 import { proxyJson } from "./proxy";
+import { handleStats, sampleAllStats, STATS_SOURCES } from "./stats";
 
 export interface Env extends PaymentEnv {
   DB: D1Database;
@@ -150,6 +151,16 @@ const CATALOG = {
       id: "heartbench", title: "HeartBench — model-dating leaderboard", kind: "link", canonical_host: "api.ishtar.numetal.xyz", auth: "none", status: "live",
       base_path: "/heartbench",
       link: "https://api.ishtar.numetal.xyz/api/heartbench",
+    },
+    {
+      id: "stats", title: "Windowed product counters", kind: "derived", auth: "none", status: "live",
+      base_path: "/{product}/stats",
+      endpoints: [
+        { method: "GET", path: "/ishtar/stats", desc: "Ishtar courtship counters over a window (?window=24h|7d)" },
+        { method: "GET", path: "/curb/stats", desc: "CURB matches over a window + current open offers (?window=24h|7d)" },
+      ],
+      shape: { as_of: "ISO-8601", window: "24h|7d", value: "windowed deltas (null when unmeasurable)", gauge: "point-in-time values" },
+      note: "Both upstreams publish ALL-TIME counters only, so the window is measured here from an hourly sample history in KV — value is current minus the baseline at now-window. Totals are never emitted: an all-time counter scrolls identically whether the product got forty turns this week or none since March. Unmeasurable windows return null (render as an em dash), never 0.",
     },
     {
       id: "llms", title: "Estate llms.txt aggregate", kind: "local", auth: "none", status: "live",
@@ -359,6 +370,12 @@ export default {
     if (rawp === "/ishtar") return Response.redirect("https://api.ishtar.numetal.xyz/", 302);
     if (rawp === "/heartbench") return Response.redirect("https://api.ishtar.numetal.xyz/api/heartbench", 302);
 
+    // ===== windowed product counters — derived, never a proxy of an all-time total =====
+    // Both upstreams publish all-time counters only, so the window is measured here from an hourly
+    // KV sample history. Free public reads; no paid surface is proxied and no settlement realm moves.
+    if (rawp === "/ishtar/stats") return handleStats(env, co, STATS_SOURCES.ishtar, url.searchParams.get("window"));
+    if (rawp === "/curb/stats") return handleStats(env, co, STATS_SOURCES.curb, url.searchParams.get("window"));
+
     // ===== llms aggregate =====
     if (rawp === "/llms" || rawp === "/estate/llms") {
       const full = url.searchParams.get("full") === "1";
@@ -458,6 +475,10 @@ export default {
     const id = env.POLLER.idFromName("singleton");
     const stub = env.POLLER.get(id);
     ctx.waitUntil(stub.fetch("https://poller/run").then(() => {}));
+    // Keep the windowed-counter history building even on days with no traffic — otherwise a 7d
+    // window is only ever measurable on properties that happen to get hourly hits. Isolated from
+    // the poll: it reads two public URLs and writes KV, and it swallows its own failures.
+    ctx.waitUntil(sampleAllStats(env).catch(() => {}));
   },
 
   async queue(batch: MessageBatch, env: Env): Promise<void> {

@@ -97,6 +97,32 @@ export function buildOpenApi(env: Env) {
     required: ["name", "services"],
   };
 
+  const windowedStatsSchema = {
+    type: "object",
+    properties: {
+      source: { type: "string" },
+      upstream: { type: "string", format: "uri" },
+      as_of: { type: ["string", "null"], description: "Freshness stamp of the current reading." },
+      as_of_source: {
+        type: "string",
+        enum: ["upstream", "upstream_request_time", "gateway_fetch", "last_sample", "unavailable"],
+        description:
+          "Where as_of came from. Only `upstream` proves data age: `upstream_request_time` is a stamp the upstream generates when asked (always fresh, proves nothing) and `gateway_fetch` is our own clock. Do not build a freshness monitor on either.",
+      },
+      window: { type: "string", enum: ["24h", "7d"] },
+      window_sec: { type: "integer" },
+      value: { type: "object", description: "Windowed deltas. null means unmeasurable — render an em dash, never 0.", additionalProperties: { type: ["integer", "number", "null"] } },
+      gauge: { type: "object", description: "Point-in-time values, not windowed.", additionalProperties: { type: ["integer", "number", "null"] } },
+      baseline: { type: ["object", "null"], properties: { as_of: { type: "string" }, age_sec: { type: "integer" } } },
+      coverage_sec: { type: "integer", description: "How far back the sample history reaches." },
+      samples: { type: "integer" },
+      stale: { type: "boolean", description: "true when the reading came from the sample history because upstream was unreachable." },
+      insufficient_history: { type: "boolean", description: "Present when no baseline old enough exists yet." },
+      reset_detected: { type: "boolean", description: "Present when a counter moved backwards." },
+    },
+    required: ["source", "window", "value", "stale"],
+  };
+
   const blogPostSchema = {
     type: "object",
     properties: {
@@ -276,6 +302,36 @@ export function buildOpenApi(env: Env) {
           tags: ["Numetal"],
           security: [],
           responses: { "200": jsonResp("Proxied status JSON.", { type: "object" }) },
+        },
+      },
+      "/ishtar/stats": {
+        get: {
+          operationId: "ishtarWindowedStats",
+          summary: "Ishtar courtship counters over a window (never all-time)",
+          description:
+            "Upstream publishes all-time counters only, so the window is measured at the gateway from an hourly sample history: value = current minus the baseline sampled at now-window. Counters that cannot be measured yet (history shorter than the window) or that moved backwards return null, never 0. gauge carries point-in-time values that are not windowed.",
+          tags: ["Stats"],
+          security: [],
+          parameters: [{ name: "window", in: "query", schema: { type: "string", enum: ["24h", "7d"] }, description: "Measurement window (default 7d)." }],
+          responses: {
+            "200": jsonResp("Windowed counters.", windowedStatsSchema),
+            "502": { description: "Upstream unavailable and no sample history to fall back on." },
+          },
+        },
+      },
+      "/curb/stats": {
+        get: {
+          operationId: "curbWindowedStats",
+          summary: "CURB matches over a window plus current open offers",
+          description:
+            "Same windowing contract as /ishtar/stats. open_offers is a gauge (it can go down) and is reported unwindowed. The upstream health document carries no timestamp, so as_of_source is gateway_fetch — it proves the fetch succeeded, not that upstream data is fresh.",
+          tags: ["Stats"],
+          security: [],
+          parameters: [{ name: "window", in: "query", schema: { type: "string", enum: ["24h", "7d"] }, description: "Measurement window (default 7d)." }],
+          responses: {
+            "200": jsonResp("Windowed counters.", windowedStatsSchema),
+            "502": { description: "Upstream unavailable and no sample history to fall back on." },
+          },
         },
       },
       "/llms": {
