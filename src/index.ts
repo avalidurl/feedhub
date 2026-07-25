@@ -17,6 +17,7 @@ import { agentEmailRecipientMap } from "./agent-email-recipients";
 import { buildOpenApi } from "./discovery/openapi";
 import { AGENT_EMAIL_SKU, skuDescription, x402Requirements } from "./payments/x402";
 import { assetR2Key, serveAsset } from "./assets";
+import { proxyJson } from "./proxy";
 
 export interface Env extends PaymentEnv {
   DB: D1Database;
@@ -42,6 +43,11 @@ export interface Env extends PaymentEnv {
 
 const enc = new TextEncoder();
 const now = () => Date.now();
+
+// Per-feed proxy cache TTLs (seconds). One number per feed, never a shared constant: the status
+// feed backs a liveness chip and must stay tight, while the burn log can sit for minutes. KV
+// refuses an expirationTtl under 60s, so 60 is the floor.
+const PROXY_TTL = { fees: 60, burns: 300, status: 60 } as const;
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", ...headers } });
 
@@ -342,10 +348,12 @@ export default {
     if (rawp === "/feed.json" || rawp === "/feed/feed.json") return kvFeed(env, "rendered:feed.json", "application/feed+json; charset=utf-8", co);
     if (rawp === "/feed") return json({ rss: "https://api.gokhan.vc/feed.xml", json: "https://api.gokhan.vc/feed.json" }, 200, co);
 
-    // ===== numetal (proxy, short-KV-cached) =====
-    if (rawp === "/numetal/fees") return proxyJson(env, co, "https://numetal.xyz/fees/data", "proxy:numetal:fees");
-    if (rawp === "/numetal/burns") return proxyJson(env, co, "https://numetal.xyz/fees/events", "proxy:numetal:burns");
-    if (rawp === "/numetal/status") return proxyJson(env, co, "https://status.numetal.xyz/status.json", "proxy:numetal:status");
+    // ===== numetal (proxy, per-feed KV TTL + 24h stale-if-error) =====
+    // Each feed carries its OWN ttl. Burns is an append-only event log that changes on the hour at
+    // most, so it caches for 5 min; status backs the `STATUS n/n` chip and must stay tight.
+    if (rawp === "/numetal/fees") return proxyJson(env, co, "https://numetal.xyz/fees/data", "proxy:numetal:fees", PROXY_TTL.fees);
+    if (rawp === "/numetal/burns") return proxyJson(env, co, "https://numetal.xyz/fees/events", "proxy:numetal:burns", PROXY_TTL.burns);
+    if (rawp === "/numetal/status") return proxyJson(env, co, "https://status.numetal.xyz/status.json", "proxy:numetal:status", PROXY_TTL.status);
 
     // ===== ishtar / heartbench — LINK, never proxy (keeps x402/MPP settlement realm intact) =====
     if (rawp === "/ishtar") return Response.redirect("https://api.ishtar.numetal.xyz/", 302);
@@ -470,23 +478,6 @@ export default {
 async function kvFeed(env: Env, key: string, ctype: string, co: Record<string, string>): Promise<Response> {
   const body = (await env.FEED_CACHE.get(key)) ?? (key.endsWith("json") ? '{"version":"https://jsonfeed.org/version/1.1","items":[]}' : '<?xml version="1.0"?><rss version="2.0"><channel><title>All of Gökhan — unified</title></channel></rss>');
   return new Response(body, { headers: { "content-type": ctype, "cache-control": "public, max-age=300", ...co } });
-}
-
-// Thin read-only proxy for public upstream JSON (numetal fees/burns/status). 60s KV cache so a
-// burst on api.gokhan.vc never hammers the origin; upstream stays the source of truth.
-async function proxyJson(env: Env, co: Record<string, string>, upstream: string, cacheKey: string): Promise<Response> {
-  let body = await env.FEED_CACHE.get(cacheKey);
-  if (body === null) {
-    try {
-      const r = await fetch(upstream, { headers: { "User-Agent": "api.gokhan.vc/1.0" } });
-      if (!r.ok) return json({ error: "upstream_status", status: r.status, upstream }, 502, co);
-      body = await r.text();
-      await env.FEED_CACHE.put(cacheKey, body, { expirationTtl: 60 });
-    } catch {
-      return json({ error: "upstream_unreachable", upstream }, 502, co);
-    }
-  }
-  return new Response(body, { headers: { "content-type": "application/json; charset=utf-8", "cache-control": "public, max-age=60", ...co } });
 }
 
 // ---------- subscribe ----------
