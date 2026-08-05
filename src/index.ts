@@ -243,6 +243,10 @@ function subscribeForm(site: string): string {
 <form method="POST" action="https://api.gokhan.vc/newsletter/subscribe">
   <input type="email" name="email" required autofocus placeholder="you@email.com" autocomplete="email">
   <input type="hidden" name="site" value="${s}">
+  <div aria-hidden="true" style="position:absolute;left:-9999px;top:-9999px">
+    <label>Company<input type="text" name="company" tabindex="-1" autocomplete="off"></label>
+  </div>
+  <input type="hidden" name="ts" value="${Date.now()}">
   <button type="submit">Subscribe</button>
 </form>
 <p class="m">Double opt-in — you'll get one email to confirm. Unsubscribe anytime, one click.</p>`;
@@ -501,6 +505,15 @@ async function kvFeed(env: Env, key: string, ctype: string, co: Record<string, s
   return new Response(body, { headers: { "content-type": ctype, "cache-control": "public, max-age=300", ...co } });
 }
 
+// Burner/disposable mail domains — these produce bounces and never confirm.
+const DISPOSABLE = new Set([
+  "mailinator.com", "guerrillamail.com", "10minutemail.com", "tempmail.com",
+  "temp-mail.org", "throwawaymail.com", "yopmail.com", "trashmail.com",
+  "sharklasers.com", "getnada.com", "dispostable.com", "maildrop.cc",
+  "fakeinbox.com", "mailnesia.com", "tempinbox.com", "spamgourmet.com",
+  "mintemail.com", "emailondeck.com", "moakt.com", "tempr.email",
+]);
+
 // ---------- subscribe ----------
 async function subscribe(req: Request, env: Env, co: Record<string, string>): Promise<Response> {
   const wantsHtml = (req.headers.get("Accept") || "").includes("text/html");
@@ -523,10 +536,36 @@ async function subscribe(req: Request, env: Env, co: Record<string, string>): Pr
   // Rate-limit this unauthenticated endpoint: it writes D1 rows and (email path) fires an outbound
   // Resend confirm mail — a mailbomb/abuse vector that could torch the sender reputation the launch
   // blast depends on. Global + per-IP + per-recipient caps. Turnstile lands when the public form ships.
+  // Honeypot: a hidden field no human can see. Accept-and-drop so the bot
+  // gets a 200 and does not learn to adapt — but NOTHING is written or sent.
+  if ((form.get("company") as string || "").trim()) {
+    return wantsHtml ? htmlResp(subscribeThanks(), co) : json({ ok: true }, 200, co);
+  }
+  // Instant submits are automated: a human takes seconds to type an address.
+  const rendered = parseInt((form.get("ts") as string) || "0", 10);
+  if (rendered > 0 && Date.now() - rendered < 2000) {
+    return wantsHtml ? htmlResp(subscribeThanks(), co) : json({ ok: true }, 200, co);
+  }
+  // Reject addresses whose domain cannot receive mail. A bounced confirm costs
+  // sender reputation, which is far more expensive than a missed signup.
+  if (email) {
+    const domain = email.split("@")[1] || "";
+    if (!domain.includes(".") || domain.endsWith(".") || DISPOSABLE.has(domain)) {
+      return json({ error: "bad email" }, 400, co);
+    }
+  }
   const ip = req.headers.get("CF-Connecting-IP") || "0";
-  if (!(await rlHit(env, "sub:global", 60, 3600)) || !(await rlHit(env, "sub:ip:" + ip, 8, 3600)))
+  // Tightened after a bot flood (2026-08): 462 of 489 form signups never
+  // confirmed, producing a 10% bounce rate and a spam complaint on a domain
+  // the whole estate newsletter depends on. Real organic volume is a couple of
+  // signups a day, so these ceilings are still generous.
+  if (!(await rlHit(env, "sub:day", 60, 86400)) ||
+      !(await rlHit(env, "sub:global", 15, 3600)) ||
+      !(await rlHit(env, "sub:ip:" + ip, 3, 3600)) ||
+      !(await rlHit(env, "sub:ipday:" + ip, 5, 86400)))
     return json({ error: "rate_limited" }, 429, co);
-  if (email && !(await rlHit(env, "sub:to:" + email, 1, 3600)))
+  // One confirmation email per address per day — not per hour.
+  if (email && !(await rlHit(env, "sub:to:" + email, 1, 86400)))
     return json({ error: "rate_limited" }, 429, co);
   // upsert by matching identifier — one row per person
   let existing = email
@@ -747,7 +786,7 @@ async function adminStatus(req: Request, env: Env): Promise<Response> {
   if (!bearerOk(req, env)) return new Response("unauthorized", { status: 401 });
   const q = async (sql: string) => (await env.DB.prepare(sql).first<any>()) || {};
   return json({
-    subscribers: await q("SELECT COUNT(*) c, SUM(email IS NOT NULL) emails, SUM(wallet IS NOT NULL) wallets, SUM(email_status='active') active_email, SUM(xmtp_status='active') active_xmtp, SUM(email_status='unsub' OR xmtp_status='unsub') unsub FROM subscribers"),
+    subscribers: await q("SELECT COUNT(*) c, SUM(email IS NOT NULL) emails, SUM(wallet IS NOT NULL) wallets, SUM(email_status='active' AND email IS NOT NULL) active_email, SUM(xmtp_status='active') active_xmtp, SUM(email_status='unsub' OR xmtp_status='unsub') unsub FROM subscribers"),
     pending_fanout: (await q("SELECT COUNT(*) c FROM items WHERE notified_at IS NULL")).c,
     items: (await q("SELECT COUNT(*) c FROM items")).c,
     sends: await q("SELECT COUNT(*) c, SUM(status='sent') sent, SUM(status='failed') failed FROM sends"),
