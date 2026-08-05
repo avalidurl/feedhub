@@ -39,11 +39,14 @@ export interface Env extends PaymentEnv {
   RESEND_SEGMENT: string;
   RESEND_WEBHOOK_SECRET: string;
   TURNSTILE_SECRET: string;
+  TURNSTILE_SITES?: string;
   AGENT_EMAIL_SENDER?: string;
 }
 
 const enc = new TextEncoder();
 const now = () => Date.now();
+// Turnstile public sitekey — safe to ship in markup; the secret stays server-side.
+const TURNSTILE_SITEKEY = "0x4AAAAAAEG8CWZN8yq8G3kt";
 
 // Per-feed proxy cache TTLs (seconds). One number per feed, never a shared constant: the status
 // feed backs a liveness chip and must stay tight, while the burn log can sit for minutes. KV
@@ -247,8 +250,10 @@ function subscribeForm(site: string): string {
     <label>Company<input type="text" name="company" tabindex="-1" autocomplete="off"></label>
   </div>
   <input type="hidden" name="ts" value="${Date.now()}">
+  <div class="cf-turnstile" data-sitekey="${TURNSTILE_SITEKEY}" data-theme="auto"></div>
   <button type="submit">Subscribe</button>
 </form>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 <p class="m">Double opt-in — you'll get one email to confirm. Unsubscribe anytime, one click.</p>`;
 }
 function subscribeThanks(): string {
@@ -525,8 +530,12 @@ async function subscribe(req: Request, env: Env, co: Record<string, string>): Pr
   const ts = form.get("cf-turnstile-response") as string || "";
   if (!email && !wallet) return json({ error: "email or wallet required" }, 400, co);
   if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: "bad email" }, 400, co);
-  // Turnstile (if configured)
-  if (env.TURNSTILE_SECRET) {
+  // Turnstile — enforced PER SITE. A form that does not yet render a widget
+  // would fail every submission, so a site only opts in once its form ships a
+  // token. TURNSTILE_SITES is a comma list of `site` values ("*" = all).
+  const tsSites = (env.TURNSTILE_SITES || "").split(",").map((x) => x.trim()).filter(Boolean);
+  const tsRequired = !!env.TURNSTILE_SECRET && (tsSites.includes("*") || tsSites.includes(site));
+  if (tsRequired) {
     const v = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
       method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ secret: env.TURNSTILE_SECRET, response: ts }),
