@@ -13,6 +13,7 @@ export const ESTATE_SITES: readonly EstateSite[] = [
   { id: "ishtar", host: "ishtar.numetal.xyz", llms: "https://ishtar.numetal.xyz/llms.txt", llmsFull: "https://ishtar.numetal.xyz/llms-full.txt", blogBase: "https://ishtar.numetal.xyz/blog", blogPattern: "/blog/{slug}/" },
   { id: "numetal", host: "numetal.xyz", llms: "https://numetal.xyz/llms.txt", blogBase: "https://numetal.xyz/blog", blogPattern: "/blog/{slug}" },
   { id: "curb", host: "curb.numetal.xyz", llms: "https://curb.numetal.xyz/llms.txt", blogBase: "https://curb.numetal.xyz/blog", blogPattern: "/blog/{slug}" },
+  { id: "launch", host: "launch.numetal.xyz", llms: "https://launch.numetal.xyz/llms.txt", blogBase: "https://launch.numetal.xyz", blogPattern: "/{slug}" },
   { id: "gokhanvc", host: "gokhan.vc", llms: "https://gokhan.vc/llms.txt", blogBase: "https://gokhan.vc/blog", blogPattern: "/blog/{slug}" },
   { id: "memex", host: "gokhanturhan.com", llms: "https://gokhanturhan.com/llms.txt", blogBase: "https://gokhanturhan.com/journal", blogPattern: "/journal/{slug}/" },
 ] as const;
@@ -25,6 +26,9 @@ const SITE_ALIASES: Record<string, string> = {
   curb: "curb",
   "curb.numetal.xyz": "curb",
   "inference-swap": "curb",
+  launch: "launch",
+  "launch.numetal.xyz": "launch",
+  "launch-router": "launch",
   atelier: "gokhanvc",
   "gokhan.vc": "gokhanvc",
   gokhanvc: "gokhanvc",
@@ -121,6 +125,15 @@ export const SOCIAL_CATALOG = {
       follow: [
         { platform: "X", handle: "@numetalxyz", href: "https://x.com/numetalxyz" },
       ],
+      join: [],
+      contact: [{ type: "email", href: "mailto:contact@numetal.xyz", address: "contact@numetal.xyz" }],
+    },
+    {
+      id: "launch",
+      label: "Launch",
+      domain: "launch.numetal.xyz",
+      url: "https://launch.numetal.xyz",
+      follow: [{ platform: "X", handle: "@goekhanvc", href: "https://x.com/goekhanvc" }],
       join: [],
       contact: [{ type: "email", href: "mailto:contact@numetal.xyz", address: "contact@numetal.xyz" }],
     },

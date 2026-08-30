@@ -20,7 +20,8 @@ test("llmsCombinedText includes host sections", () => {
 });
 
 test("social catalog covers every estate property", () => {
-  assert.equal(SOCIAL_CATALOG.properties.length, 5);
+  assert.equal(SOCIAL_CATALOG.properties.length, 6);
+  assert.ok(SOCIAL_CATALOG.properties.some((p) => p.id === "launch"));
   const memex = SOCIAL_CATALOG.properties.find((p) => p.id === "memex");
   assert.ok(memex?.follow.some((f) => f.href.includes("x.com/goekhan")));
   // Studio property carries the current brand and X handle.

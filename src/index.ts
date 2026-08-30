@@ -121,7 +121,7 @@ const CATALOG = {
         { method: "GET", path: "/feed/rss.xml", desc: "Namespaced RSS 2.0 (same body)" },
         { method: "GET", path: "/feed/feed.json", desc: "Namespaced JSON Feed (same body)" },
       ],
-      sources: ["ishtar.numetal.xyz", "numetal.xyz", "gokhan.vc", "gokhanturhan.com"],
+      sources: ["ishtar.numetal.xyz", "numetal.xyz", "curb.numetal.xyz", "launch.numetal.xyz", "gokhan.vc", "gokhanturhan.com"],
     },
     {
       id: "newsletter", title: "Newsletter subscription (email + XMTP)", kind: "local", auth: "hmac-token", status: "live",
@@ -151,6 +151,12 @@ const CATALOG = {
       note: "Payments terminate at the canonical host. The gateway LINKS, never proxies — so the x402/MPP 402 realm and payTo stay intact for CDP Bazaar / x402scan / mppscan settlement.",
     },
     {
+      id: "launch", title: "Launch — Nuclear Crypto Launch Pad (x402 / MPP, amount 0)", kind: "link", canonical_host: "launch.numetal.xyz", auth: "none", status: "live",
+      base_path: "/launch",
+      discovery: { skill: "https://launch.numetal.xyz/skill.md", well_known: "https://launch.numetal.xyz/.well-known/x402", mcp: "https://launch.numetal.xyz/mcp", openapi: "https://launch.numetal.xyz/openapi.json" },
+      note: "Pad aggregator. User signs. Never broadcast. This gateway LINKS, never proxies — x402 amount 0 on the canonical host.",
+    },
+    {
       id: "heartbench", title: "HeartBench — model-dating leaderboard", kind: "link", canonical_host: "api.ishtar.numetal.xyz", auth: "none", status: "live",
       base_path: "/heartbench",
       link: "https://api.ishtar.numetal.xyz/api/heartbench",
@@ -173,7 +179,7 @@ const CATALOG = {
         { method: "GET", path: "/llms.txt", desc: "Combined plain-text llms index" },
         { method: "GET", path: "/llms?full=1", desc: "Include llms-full.txt where available (ishtar only)" },
       ],
-      sources: ["ishtar.numetal.xyz", "numetal.xyz", "gokhan.vc", "gokhanturhan.com"],
+      sources: ["ishtar.numetal.xyz", "numetal.xyz", "curb.numetal.xyz", "launch.numetal.xyz", "gokhan.vc", "gokhanturhan.com"],
     },
     {
       id: "blog", title: "Unified blog reader", kind: "local", auth: "none", status: "live",
@@ -230,7 +236,7 @@ function catalogHtml(): string {
 <tbody>
 <tr><td><code>agent_email</code></td><td>$1.00 USDC</td><td><code>POST /agent/email</code></td><td>x402 (Base) · MPP (Tempo)</td></tr>
 </tbody></table>
-<p class="m">Ishtar dating payments: <a href="https://api.ishtar.numetal.xyz/openapi.json">api.ishtar.numetal.xyz/openapi.json</a> — this gateway links, never proxies.</p>
+<p class="m">Ishtar dating payments: <a href="https://api.ishtar.numetal.xyz/openapi.json">api.ishtar.numetal.xyz/openapi.json</a>. Launch pad aggregator: <a href="https://launch.numetal.xyz/openapi.json">launch.numetal.xyz/openapi.json</a> (x402 amount 0). This gateway links, never proxies.</p>
 </section>
 ${svc}`;
 }
@@ -378,6 +384,7 @@ export default {
     // ===== ishtar / heartbench — LINK, never proxy (keeps x402/MPP settlement realm intact) =====
     if (rawp === "/ishtar") return Response.redirect("https://api.ishtar.numetal.xyz/", 302);
     if (rawp === "/heartbench") return Response.redirect("https://api.ishtar.numetal.xyz/api/heartbench", 302);
+    if (rawp === "/launch") return Response.redirect("https://launch.numetal.xyz/openapi.json", 302);
 
     // ===== windowed product counters — derived, never a proxy of an all-time total =====
     // Both upstreams publish all-time counters only, so the window is measured here from an hourly
