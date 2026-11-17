@@ -66,7 +66,13 @@ export function parsePaymentHeader(header: string): { to?: string; value?: strin
 }
 
 function apiBase(env: Env): string {
-  return (env.PUBLIC_API_URL || "https://api.gokhan.vc").replace(/\/+$/, "");
+  return stripTrailingSlashes(env.PUBLIC_API_URL || "https://api.gokhan.vc");
+}
+
+function stripTrailingSlashes(s: string): string {
+  let end = s.length;
+  while (end > 0 && s.charCodeAt(end - 1) === 47) end--;
+  return s.slice(0, end);
 }
 
 function modeCfg(env: Env) {

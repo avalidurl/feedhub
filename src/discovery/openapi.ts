@@ -7,7 +7,13 @@ import { AGENT_EMAIL_RECIPIENT_KEYS } from "../agent-email-recipients.ts";
 import { AGENT_EMAIL_SKU, type Sku } from "../payments/x402.ts";
 import { mppCurrency, mppEnabled, mppRecipient, MPP_NETWORK } from "../payments/mpp.ts";
 
-const apiBase = (env: Env): string => (env.PUBLIC_API_URL || "https://api.gokhan.vc").replace(/\/+$/, "");
+const apiBase = (env: Env): string => stripTrailingSlashes(env.PUBLIC_API_URL || "https://api.gokhan.vc");
+
+function stripTrailingSlashes(s: string): string {
+  let end = s.length;
+  while (end > 0 && s.charCodeAt(end - 1) === 47) end--;
+  return s.slice(0, end);
+}
 const usd = (sku: Sku): string => Number(sku.priceUsd.replace("$", "")).toFixed(6);
 
 function protocolsFor(env: Env, sku: Sku): unknown[] {

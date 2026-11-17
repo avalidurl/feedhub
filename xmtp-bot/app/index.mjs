@@ -123,6 +123,8 @@ createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/launch-blast") return send(res, 200, await launchBlast());
     return send(res, 404, { error: "not found" });
   } catch (e) {
-    send(res, 500, { error: String(e?.message ?? e) });
+    console.error("request failed", e);
+    const message = e instanceof Error && e.message ? e.message : "internal error";
+    send(res, 500, { error: message });
   }
 }).listen(PORT, () => console.log("xmtp-bot listening on", PORT));

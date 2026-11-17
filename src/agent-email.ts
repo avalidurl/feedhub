@@ -2,10 +2,10 @@
  * Paid agent cold email — $1 USDC via x402 (Base) or MPP (Tempo).
  * POST /agent/email → 402 without payment → verify → Resend to founder inbox.
  */
-import { AGENT_EMAIL_RECIPIENT_KEYS, resolveAgentEmailRecipient } from "./agent-email-recipients";
+import { AGENT_EMAIL_RECIPIENT_KEYS, resolveAgentEmailRecipient } from "./agent-email-recipients.ts";
 import type { PaymentEnv } from "./payments/env";
-import { AGENT_EMAIL_SKU, encodeX402Header, parsePaymentHeader, verifyX402Payment, x402Challenge } from "./payments/x402";
-import { buildMppChallengeHeader, mppEnabled, mppReceiptHeader, parseMppAuth, verifyMppPayment, MPP_NETWORK } from "./payments/mpp";
+import { AGENT_EMAIL_SKU, encodeX402Header, parsePaymentHeader, verifyX402Payment, x402Challenge } from "./payments/x402.ts";
+import { buildMppChallengeHeader, mppEnabled, mppReceiptHeader, parseMppAuth, verifyMppPayment, MPP_NETWORK } from "./payments/mpp.ts";
 
 type AgentEmailEnv = PaymentEnv & {
   DB: D1Database;

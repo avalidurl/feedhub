@@ -10,13 +10,13 @@
 import { recoverMessageAddress } from "viem";
 
 import type { PaymentEnv } from "./payments/env";
-import { fetchLlmsAggregate, llmsCombinedText, SOCIAL_CATALOG } from "./estate";
-import { listBlogSites, readBlogPost } from "./blog";
-import { handleAgentEmail } from "./agent-email";
-import { agentEmailRecipientMap } from "./agent-email-recipients";
-import { buildOpenApi } from "./discovery/openapi";
-import { AGENT_EMAIL_SKU, skuDescription, x402Requirements } from "./payments/x402";
-import { assetR2Key, serveAsset } from "./assets";
+import { fetchLlmsAggregate, llmsCombinedText, SOCIAL_CATALOG } from "./estate.ts";
+import { listBlogSites, readBlogPost } from "./blog.ts";
+import { handleAgentEmail } from "./agent-email.ts";
+import { agentEmailRecipientMap } from "./agent-email-recipients.ts";
+import { buildOpenApi } from "./discovery/openapi.ts";
+import { AGENT_EMAIL_SKU, skuDescription, x402Requirements } from "./payments/x402.ts";
+import { assetR2Key, serveAsset } from "./assets.ts";
 
 export interface Env extends PaymentEnv {
   DB: D1Database;
@@ -48,10 +48,22 @@ const json = (data: unknown, status = 200, headers: Record<string, string> = {})
 // ---------- ulid-ish id ----------
 function ulid(): string {
   const t = now().toString(36).padStart(9, "0");
+  const alphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
   let r = "";
-  const b = crypto.getRandomValues(new Uint8Array(10));
-  for (const x of b) r += (x % 36).toString(36);
+  // Keep only bytes in 0..35 so the id alphabet is uniform. Modulo would bias it.
+  while (r.length < 10) {
+    const b = crypto.getRandomValues(new Uint8Array(16));
+    for (let i = 0; i < b.length && r.length < 10; i++) {
+      if (b[i] < 36) r += alphabet[b[i]];
+    }
+  }
   return (t + r).slice(0, 26);
+}
+
+function stripTrailingSlashes(s: string): string {
+  let end = s.length;
+  while (end > 0 && s.charCodeAt(end - 1) === 47) end--;
+  return s.slice(0, end);
 }
 
 // ---------- URL normalization (RFC-3986-ish; canonical identity) ----------
@@ -311,7 +323,7 @@ export default {
     if (rawp === "/_meta") return json(CATALOG, 200, co);
     if (rawp === "/openapi.json") return json(buildOpenApi(env), 200, co);
     if (rawp === "/.well-known/x402") {
-      const base = (env.PUBLIC_API_URL || "https://api.gokhan.vc").replace(/\/+$/, "");
+      const base = stripTrailingSlashes(env.PUBLIC_API_URL || "https://api.gokhan.vc");
       const sku = AGENT_EMAIL_SKU;
       const resources = env.PAY_TO
         ? [{
@@ -628,8 +640,14 @@ function senderFor(originFeed: string, env: Env): string {
   const name = BRAND_SENDER[originFeed] || "Gökhan Turhan";
   // CURB product FROM on verified numetal.xyz (Resend DKIM). Public contact stays contact@numetal.xyz.
   if (originFeed === "curb") return `${name} <curb@numetal.xyz>`;
-  const m = env.SENDER.match(/<([^>]+)>/);
-  return `${name} <${m ? m[1] : "newsletter@gokhan.vc"}>`;
+  return `${name} <${senderAddress(env.SENDER)}>`;
+}
+function senderAddress(sender: string): string {
+  const start = sender.indexOf("<");
+  if (start < 0) return "newsletter@gokhan.vc";
+  const end = sender.indexOf(">", start + 1);
+  if (end <= start + 1) return "newsletter@gokhan.vc";
+  return sender.slice(start + 1, end);
 }
 
 async function emailBroadcast(env: Env, canonicalUrl: string): Promise<void> {
@@ -922,11 +940,46 @@ export class Poller {
 }
 
 // ---------- minimal feed parser (RSS 2.0 + Atom) ----------
-function parseFeed(xml: string): Array<{ title: string; link: string; author?: string; summary?: string; published?: number }> {
+function xmlText(inner: string): string {
+  let out = "";
+  let i = 0;
+  while (i < inner.length) {
+    if (inner.startsWith("<![CDATA[", i)) {
+      const end = inner.indexOf("]]>", i + 9);
+      if (end === -1) {
+        out += inner.slice(i);
+        break;
+      }
+      out += xmlText(inner.slice(i + 9, end));
+      i = end + 3;
+      continue;
+    }
+    if (inner[i] === "<") {
+      const next = inner[i + 1];
+      const taggish = next === "/" || next === "!" || next === "?" || isXmlNameStart(next);
+      if (taggish) {
+        const gt = inner.indexOf(">", i + 1);
+        if (gt === -1) break;
+        i = gt + 1;
+        continue;
+      }
+    }
+    out += inner[i];
+    i++;
+  }
+  return out.trim();
+}
+function isXmlNameStart(c: string | undefined): boolean {
+  if (!c) return false;
+  const x = c.charCodeAt(0);
+  return (x >= 65 && x <= 90) || (x >= 97 && x <= 122) || c === "_" || c === ":";
+}
+
+export function parseFeed(xml: string): Array<{ title: string; link: string; author?: string; summary?: string; published?: number }> {
   const out: any[] = [];
   const tag = (block: string, t: string) => {
     const m = block.match(new RegExp(`<${t}[^>]*>([\\s\\S]*?)</${t}>`, "i"));
-    return m ? m[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/<[^>]+>/g, "").trim() : "";
+    return m ? xmlText(m[1]) : "";
   };
   const items = xml.match(/<item[\s\S]*?<\/item>/gi) || xml.match(/<entry[\s\S]*?<\/entry>/gi) || [];
   for (const block of items) {
