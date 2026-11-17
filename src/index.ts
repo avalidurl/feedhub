@@ -975,21 +975,123 @@ function isXmlNameStart(c: string | undefined): boolean {
   return (x >= 65 && x <= 90) || (x >= 97 && x <= 122) || c === "_" || c === ":";
 }
 
+function isXmlSpace(c: string | undefined): boolean {
+  return c === " " || c === "\t" || c === "\n" || c === "\r" || c === "\f";
+}
+function xmlTagBoundary(c: string | undefined): boolean {
+  return c === ">" || c === "/" || isXmlSpace(c);
+}
+function elementBlocks(xml: string, name: string): string[] {
+  const lower = xml.toLowerCase();
+  const open = "<" + name;
+  const close = "</" + name;
+  const out: string[] = [];
+  let i = 0;
+  while (i < lower.length) {
+    const start = lower.indexOf(open, i);
+    if (start === -1) break;
+    if (!xmlTagBoundary(lower[start + open.length])) { i = start + open.length; continue; }
+    const gt = lower.indexOf(">", start);
+    if (gt === -1) break;
+    if (lower[gt - 1] === "/") { i = gt + 1; continue; }
+    let j = gt + 1;
+    let end = -1;
+    while (j < lower.length) {
+      const c = lower.indexOf(close, j);
+      if (c === -1) break;
+      let k = c + close.length;
+      while (isXmlSpace(lower[k])) k++;
+      if (lower[k] === ">") { end = k + 1; break; }
+      j = c + 1;
+    }
+    if (end === -1) break;
+    out.push(xml.slice(start, end));
+    i = end;
+  }
+  return out;
+}
+function elementInner(block: string, name: string): string {
+  const lower = block.toLowerCase();
+  const open = "<" + name.toLowerCase();
+  let from = 0;
+  while (from < lower.length) {
+    const start = lower.indexOf(open, from);
+    if (start === -1) return "";
+    if (!xmlTagBoundary(lower[start + open.length])) { from = start + open.length; continue; }
+    const gt = lower.indexOf(">", start);
+    if (gt === -1) return "";
+    if (lower[gt - 1] === "/") return "";
+    const close = "</" + name.toLowerCase();
+    let j = gt + 1;
+    while (j < lower.length) {
+      const c = lower.indexOf(close, j);
+      if (c === -1) return "";
+      let k = c + close.length;
+      while (isXmlSpace(lower[k])) k++;
+      if (lower[k] === ">") return xmlText(block.slice(gt + 1, c));
+      j = c + 1;
+    }
+    return "";
+  }
+  return "";
+}
+function linkHref(block: string): string {
+  const lower = block.toLowerCase();
+  let i = 0;
+  while (i < lower.length) {
+    const start = lower.indexOf("<link", i);
+    if (start === -1) return "";
+    if (!xmlTagBoundary(lower[start + 5])) { i = start + 5; continue; }
+    const gt = lower.indexOf(">", start);
+    if (gt === -1) return "";
+    const raw = block.slice(start + 1, gt).trim();
+    let k = 0;
+    while (k < raw.length && !isXmlSpace(raw[k]) && raw[k] !== "/" && raw[k] !== ">") k++;
+    const attrs = raw.slice(k);
+    const href = quotedAttr(attrs, "href");
+    if (href) return href;
+    i = gt + 1;
+  }
+  return "";
+}
+function quotedAttr(attrs: string, name: string): string {
+  const lower = attrs.toLowerCase();
+  const key = name.toLowerCase();
+  let i = 0;
+  while (i < lower.length) {
+    const at = lower.indexOf(key, i);
+    if (at === -1) return "";
+    const before = lower[at - 1];
+    if (at > 0 && !isXmlSpace(before) && before !== undefined) { i = at + key.length; continue; }
+    let k = at + key.length;
+    while (isXmlSpace(lower[k])) k++;
+    if (lower[k] !== "=") { i = at + key.length; continue; }
+    k++;
+    while (isXmlSpace(lower[k])) k++;
+    const q = attrs[k];
+    if (q !== '"') { i = k + 1; continue; }
+    const start = k + 1;
+    const end = attrs.indexOf('"', start);
+    if (end === -1) return "";
+    return attrs.slice(start, end);
+  }
+  return "";
+}
+
 export function parseFeed(xml: string): Array<{ title: string; link: string; author?: string; summary?: string; published?: number }> {
   const out: any[] = [];
-  const tag = (block: string, t: string) => {
-    const m = block.match(new RegExp(`<${t}[^>]*>([\\s\\S]*?)</${t}>`, "i"));
-    return m ? xmlText(m[1]) : "";
-  };
-  const items = xml.match(/<item[\s\S]*?<\/item>/gi) || xml.match(/<entry[\s\S]*?<\/entry>/gi) || [];
-  for (const block of items) {
-    let link = tag(block, "link");
-    if (!link) { const m = block.match(/<link[^>]*href="([^"]+)"/i); if (m) link = m[1]; }
-    const title = tag(block, "title");
+  const items = elementBlocks(xml, "item");
+  const blocks = items.length ? items : elementBlocks(xml, "entry");
+  for (const block of blocks) {
+    let link = elementInner(block, "link");
+    if (!link) link = linkHref(block);
+    const title = elementInner(block, "title");
     if (!link || !title) continue;
-    const dateStr = tag(block, "pubDate") || tag(block, "published") || tag(block, "updated");
+    const dateStr = elementInner(block, "pubDate") || elementInner(block, "published") || elementInner(block, "updated");
     const published = dateStr ? Date.parse(dateStr) : undefined;
-    out.push({ title, link, author: tag(block, "author") || tag(block, "dc:creator") || undefined, summary: tag(block, "description") || tag(block, "summary") || undefined, published });
+    const author = elementInner(block, "author") || elementInner(block, "dc:creator") || undefined;
+    const summary = elementInner(block, "description") || elementInner(block, "summary") || undefined;
+    out.push({ title, link, author, summary, published });
   }
   return out;
 }

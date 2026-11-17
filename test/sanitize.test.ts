@@ -71,3 +71,10 @@ test("feed text unwraps cdata and does not rebuild script tags", () => {
   assert.equal(items[0].summary?.includes("<script"), false);
   assert.equal(items[0].summary, "ipt>alert");
 });
+
+test("atom entries read a quoted link href", () => {
+  const items = parseFeed(`<feed><entry><title>Atom</title><link href="https://example.com/b" rel="alternate"/></entry></feed>`);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].title, "Atom");
+  assert.equal(items[0].link, "https://example.com/b");
+});
