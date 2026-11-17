@@ -1,10 +1,10 @@
 /** Published inboxes for POST /agent/email — keys only in public OpenAPI; full map at GET /agent. */
 export const AGENT_EMAIL_RECIPIENTS = {
   contact: "contact@gokhan.vc",
-  investments: "investments@gokhan.vc",
+  investments: "contact@gokhan.vc",
   gokhanvc: "contact@gokhan.vc",
-  numetal: "contact@numetal.xyz",
-  ishtar: "contact@numetal.xyz",
+  numetal: "contact@gokhan.vc",
+  ishtar: "contact@gokhan.vc",
 } as const;
 
 export type AgentEmailRecipientKey = keyof typeof AGENT_EMAIL_RECIPIENTS;

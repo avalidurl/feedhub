@@ -98,7 +98,7 @@ export const SOCIAL_CATALOG = {
         { platform: "Moltbook", handle: "m/courtship", href: "https://www.moltbook.com/m/courtship" },
       ],
       join: [],
-      contact: [{ type: "email", href: "mailto:contact@numetal.xyz", address: "contact@numetal.xyz" }],
+      contact: [{ type: "email", href: "mailto:contact@gokhan.vc", address: "contact@gokhan.vc" }],
     },
     {
       id: "numetal",
@@ -111,7 +111,7 @@ export const SOCIAL_CATALOG = {
         { platform: "Discord", handle: "Numetal", href: "https://discord.gg/MC4DYumPMz" },
       ],
       join: [{ platform: "Discord", href: "https://discord.gg/MC4DYumPMz", note: "builder chat" }],
-      contact: [{ type: "email", href: "mailto:contact@numetal.xyz", address: "contact@numetal.xyz" }],
+      contact: [{ type: "email", href: "mailto:contact@gokhan.vc", address: "contact@gokhan.vc" }],
     },
     {
       id: "curb",
@@ -122,7 +122,7 @@ export const SOCIAL_CATALOG = {
         { platform: "X", handle: "@numetalxyz", href: "https://x.com/numetalxyz" },
       ],
       join: [],
-      contact: [{ type: "email", href: "mailto:contact@numetal.xyz", address: "contact@numetal.xyz" }],
+      contact: [{ type: "email", href: "mailto:contact@gokhan.vc", address: "contact@gokhan.vc" }],
     },
     {
       id: "gokhanvc",
@@ -133,7 +133,7 @@ export const SOCIAL_CATALOG = {
       join: [],
       contact: [
         { type: "email", href: "mailto:contact@gokhan.vc", address: "contact@gokhan.vc" },
-        { type: "email", href: "mailto:investments@gokhan.vc", address: "investments@gokhan.vc", note: "investment outreach" },
+        { type: "email", href: "mailto:contact@gokhan.vc", address: "contact@gokhan.vc", note: "investment outreach" },
       ],
     },
     {

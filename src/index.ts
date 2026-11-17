@@ -236,7 +236,7 @@ function subscribeForm(site: string): string {
 <h1>Subscribe</h1>
 <p class="m">One newsletter across everything I make — Ishtar, Numetal, the journal, the brief. Signal only.</p>
 <form method="POST" action="https://api.gokhan.vc/newsletter/subscribe">
-  <input type="email" name="email" required autofocus placeholder="you@email.com" autocomplete="email">
+  <input type="email" name="email" required autofocus placeholder="contact@gokhan.vc" autocomplete="email">
   <input type="hidden" name="site" value="${s}">
   <button type="submit">Subscribe</button>
 </form>
@@ -627,7 +627,7 @@ async function resendUpsertContact(env: Env, email: string, unsubscribed: boolea
   });
 }
 // Per-brand newsletter sender display names — always "… by Gökhan Turhan". Same verified
-// address (newsletter@gokhan.vc) so SPF/DKIM/DMARC alignment is unchanged; only the display name
+// address (contact@gokhan.vc) so SPF/DKIM/DMARC alignment is unchanged; only the display name
 // varies by the post's origin feed.
 const BRAND_SENDER: Record<string, string> = {
   ishtar: "Ishtar by Gökhan Turhan",
@@ -638,15 +638,15 @@ const BRAND_SENDER: Record<string, string> = {
 };
 function senderFor(originFeed: string, env: Env): string {
   const name = BRAND_SENDER[originFeed] || "Gökhan Turhan";
-  // CURB product FROM on verified numetal.xyz (Resend DKIM). Public contact stays contact@numetal.xyz.
-  if (originFeed === "curb") return `${name} <curb@numetal.xyz>`;
+  // CURB product FROM on verified numetal.xyz (Resend DKIM). Public contact stays contact@gokhan.vc.
+  if (originFeed === "curb") return `${name} <contact@gokhan.vc>`;
   return `${name} <${senderAddress(env.SENDER)}>`;
 }
 function senderAddress(sender: string): string {
   const start = sender.indexOf("<");
-  if (start < 0) return "newsletter@gokhan.vc";
+  if (start < 0) return "contact@gokhan.vc";
   const end = sender.indexOf(">", start + 1);
-  if (end <= start + 1) return "newsletter@gokhan.vc";
+  if (end <= start + 1) return "contact@gokhan.vc";
   return sender.slice(start + 1, end);
 }
 

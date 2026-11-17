@@ -12,18 +12,18 @@ test("default contact key resolves to contact@gokhan.vc", () => {
   assert.equal(resolveAgentEmailRecipient("  CONTACT  "), "contact@gokhan.vc");
 });
 
-test("numetal and ishtar route to contact@numetal.xyz", () => {
-  assert.equal(resolveAgentEmailRecipient("numetal"), "contact@numetal.xyz");
-  assert.equal(resolveAgentEmailRecipient("ishtar"), "contact@numetal.xyz");
+test("numetal and ishtar route to contact@gokhan.vc", () => {
+  assert.equal(resolveAgentEmailRecipient("numetal"), "contact@gokhan.vc");
+  assert.equal(resolveAgentEmailRecipient("ishtar"), "contact@gokhan.vc");
 });
 
 test("recipient map matches published inboxes", () => {
   assert.deepEqual(agentEmailRecipientMap(), {
     contact: "contact@gokhan.vc",
-    investments: "investments@gokhan.vc",
+    investments: "contact@gokhan.vc",
     gokhanvc: "contact@gokhan.vc",
-    numetal: "contact@numetal.xyz",
-    ishtar: "contact@numetal.xyz",
+    numetal: "contact@gokhan.vc",
+    ishtar: "contact@gokhan.vc",
   });
   assert.equal(Object.keys(AGENT_EMAIL_RECIPIENTS).length, 5);
 });
